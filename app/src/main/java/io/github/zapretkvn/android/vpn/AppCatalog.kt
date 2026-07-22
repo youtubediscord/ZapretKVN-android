@@ -25,6 +25,7 @@ class AppCatalog(context: Context) {
     suspend fun load(): List<InstalledApp> = withContext(Dispatchers.IO) {
         val browserPackages = installedBrowserPackages()
         val telegramPackages = installedTelegramPackages()
+        val youtubePackages = installedYouTubePackages()
         installedApplications()
             .asSequence()
             .filterNot { it.packageName == appContext.packageName }
@@ -42,6 +43,7 @@ class AppCatalog(context: Context) {
                         packageName = application.packageName,
                         browserPackages = browserPackages,
                         telegramPackages = telegramPackages,
+                        youtubePackages = youtubePackages,
                     ),
                 )
             }
@@ -63,6 +65,15 @@ class AppCatalog(context: Context) {
 
     private fun installedTelegramPackages(): Set<String> = handlerPackages(
         Intent(Intent.ACTION_VIEW, Uri.parse("tg://resolve?domain=telegram"))
+            .addCategory(Intent.CATEGORY_BROWSABLE),
+    )
+
+    private fun installedYouTubePackages(): Set<String> = handlerPackages(
+        Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/watch?v=dQw4w9WgXcQ"))
+            .addCategory(Intent.CATEGORY_BROWSABLE),
+        Intent(Intent.ACTION_VIEW, Uri.parse("https://youtu.be/dQw4w9WgXcQ"))
+            .addCategory(Intent.CATEGORY_BROWSABLE),
+        Intent(Intent.ACTION_VIEW, Uri.parse("vnd.youtube:dQw4w9WgXcQ"))
             .addCategory(Intent.CATEGORY_BROWSABLE),
     )
 
@@ -101,6 +112,16 @@ object PopularAppSuggestions {
         "com.instagram.android" to "Instagram",
         "com.instagram.lite" to "Instagram Lite",
         "com.google.android.youtube" to "YouTube",
+        "com.google.android.apps.youtube.music" to "YouTube Music",
+        "app.revanced.android.youtube" to "YouTube ReVanced",
+        "app.revanced.android.apps.youtube.music" to "YouTube Music ReVanced",
+        "app.rvx.android.youtube" to "YouTube ReVanced Extended",
+        "app.rvx.android.apps.youtube.music" to "YouTube Music ReVanced Extended",
+        "com.vanced.android.youtube" to "YouTube Vanced",
+        "com.vanced.android.apps.youtube.music" to "YouTube Music Vanced",
+        "app.morphe.android.youtube" to "YouTube Morphe",
+        "app.morphe.androoid.youtube" to "YouTube Morphe",
+        "app.morphe.android.apps.youtube.music" to "YouTube Music Morphe",
         "org.telegram.messenger" to "Telegram",
         "org.telegram.messenger.beta" to "Telegram Beta",
         "org.telegram.messenger.web" to "Telegram Direct / FOSS",
@@ -167,8 +188,10 @@ internal fun suggestedAppLabel(
     packageName: String,
     browserPackages: Set<String>,
     telegramPackages: Set<String> = emptySet(),
+    youtubePackages: Set<String> = emptySet(),
 ): String? = PopularAppSuggestions.labelFor(packageName) ?: when (packageName) {
     in browserPackages -> "Браузер"
     in telegramPackages -> "Telegram-клиент"
+    in youtubePackages -> "YouTube-клиент"
     else -> null
 }

@@ -122,6 +122,16 @@ class VpnAppScopePreflightTest {
 
         assertTrue("com.instagram.android" in packages)
         assertTrue("com.google.android.youtube" in packages)
+        assertTrue("com.google.android.apps.youtube.music" in packages)
+        assertTrue("app.revanced.android.youtube" in packages)
+        assertTrue("app.revanced.android.apps.youtube.music" in packages)
+        assertTrue("app.rvx.android.youtube" in packages)
+        assertTrue("app.rvx.android.apps.youtube.music" in packages)
+        assertTrue("com.vanced.android.youtube" in packages)
+        assertTrue("com.vanced.android.apps.youtube.music" in packages)
+        assertTrue("app.morphe.android.youtube" in packages)
+        assertTrue("app.morphe.androoid.youtube" in packages)
+        assertTrue("app.morphe.android.apps.youtube.music" in packages)
         assertTrue("org.telegram.messenger" in packages)
         assertTrue("org.telegram.messenger.beta" in packages)
         assertTrue("org.telegram.messenger.web" in packages)
@@ -173,6 +183,26 @@ class VpnAppScopePreflightTest {
                 packageName = "com.example.notes",
                 browserPackages = emptySet(),
                 telegramPackages = setOf("com.example.telegramfork"),
+            ),
+        )
+    }
+
+    @Test
+    fun `any youtube link handler is suggested without a hardcoded package`() {
+        assertEquals(
+            "YouTube-клиент",
+            suggestedAppLabel(
+                packageName = "com.example.youtube.client",
+                browserPackages = emptySet(),
+                youtubePackages = setOf("com.example.youtube.client"),
+            ),
+        )
+        assertEquals(
+            "Браузер",
+            suggestedAppLabel(
+                packageName = "com.example.browser",
+                browserPackages = setOf("com.example.browser"),
+                youtubePackages = setOf("com.example.browser"),
             ),
         )
     }
