@@ -157,6 +157,7 @@ MVP готов только когда выполнены все пункты:
 - [x] `I3-03` Реализовать маленький LKG cache адреса proxy: fresh 24 часа, аварийный срок до 7 дней, исходное имя сохранять для TLS/Reality SNI.
 - [x] `I3-04` Детектировать Private DNS off/automatic/strict через `LinkProperties`; системную настройку никогда не менять.
 - [x] `I3-05` Реализовать четыре режима GUI: Автоматически, DNS Android, Защищённый через VPN, Из JSON.
+- [x] `I3-05A` Добавить выключенный по умолчанию «Только IPv4 через VPN»: `ipv4_only` применяется только к generated secure DNS rules, не меняя direct/LAN, TUN IPv6 и режим «Из JSON».
 - [x] `I3-06` Создать `RuntimeConfigBuilder`, который добавляет только `zapret-*` overlays и не меняет сохранённый JSON.
 - [x] `I3-07` В managed Auto/Secure использовать реальные IP, `reverse_mapping`, cache 4096 и DoH `fallback/sequential`; FakeIP не создавать.
 - [x] `I3-08` Брать внутренний DNS через `TunOptions.GetDNSServerAddress()` и передавать его в `VpnService.Builder.addDnsServer()`.

@@ -123,6 +123,7 @@ class DiagnosticExporter(
                 "dns",
                 buildJsonObject {
                     put("mode", settings.dnsMode.name)
+                    put("proxy_ipv4_only", settings.proxyIpv4Only)
                     put("private_dns_mode", network.privateDnsMode)
                     put("private_dns_active", network.privateDnsActive)
                 },

@@ -417,6 +417,11 @@ class ProfilesViewModel(
         vpnController.restartIfConnected("Смена режима DNS")
     }
 
+    fun setProxyIpv4Only(enabled: Boolean) = operation(markBusy = false) {
+        settingsStore.setProxyIpv4Only(enabled)
+        vpnController.restartIfConnected("Смена IP-стратегии DNS")
+    }
+
     fun setUpdateChannel(channel: UpdateChannel) = operation(markBusy = false) {
         settingsStore.setUpdateChannel(channel)
     }

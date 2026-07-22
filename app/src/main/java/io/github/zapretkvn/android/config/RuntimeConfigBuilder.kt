@@ -21,6 +21,7 @@ enum class DnsMode {
 
 data class RuntimeConfigOptions(
     val dnsMode: DnsMode = DnsMode.FromJson,
+    val proxyIpv4Only: Boolean = false,
     val bootstrapHost: BootstrapHostOverlay? = null,
     val vpnHiding: VpnHidingOptions = VpnHidingOptions(),
 )
@@ -143,6 +144,7 @@ object RuntimeConfigBuilder {
         val dnsOverlay = applyDnsOverlay(
             root = JsonObject(runtimeRoot),
             mode = options.dnsMode,
+            proxyIpv4Only = options.proxyIpv4Only,
             selectedProxyTag = selectedProxyTag,
             bootstrapHost = options.bootstrapHost,
         )
@@ -154,6 +156,7 @@ object RuntimeConfigBuilder {
     private fun applyDnsOverlay(
         root: JsonObject,
         mode: DnsMode,
+        proxyIpv4Only: Boolean,
         selectedProxyTag: String?,
         bootstrapHost: BootstrapHostOverlay?,
     ): RuntimeConfigResult {
@@ -181,8 +184,14 @@ object RuntimeConfigBuilder {
             val otherRules = existingRules.filterNot(::isRejectRule)
             val generated = when (mode) {
                 DnsMode.Android -> listOf(catchAllDnsRule(ANDROID_DNS_TAG))
-                DnsMode.Secure -> listOf(catchAllDnsRule(SECURE_DNS_TAG))
-                DnsMode.Automatic -> automaticDnsRules(root, checkNotNull(selectedProxyTag))
+                DnsMode.Secure -> listOf(
+                    catchAllDnsRule(SECURE_DNS_TAG, ipv4Only = proxyIpv4Only),
+                )
+                DnsMode.Automatic -> automaticDnsRules(
+                    root,
+                    checkNotNull(selectedProxyTag),
+                    proxyIpv4Only,
+                )
                 DnsMode.FromJson -> emptyList()
             }
             dns["rules"] = JsonArray(rejectRules + generated + otherRules)
@@ -261,7 +270,11 @@ object RuntimeConfigBuilder {
             put("detour", proxyTag)
         }
 
-    private fun automaticDnsRules(root: JsonObject, selectedProxyTag: String): List<JsonElement> {
+    private fun automaticDnsRules(
+        root: JsonObject,
+        selectedProxyTag: String,
+        proxyIpv4Only: Boolean,
+    ): List<JsonElement> {
         val result = mutableListOf<JsonElement>()
         result += buildJsonObject {
             put("domain_regex", JsonArray(listOf(JsonPrimitive("^[^.]+$"))))
@@ -287,7 +300,18 @@ object RuntimeConfigBuilder {
             val server = if (outbound == "direct") ANDROID_DNS_TAG else {
                 if (outbound == selectedProxyTag) SECURE_DNS_TAG else return@mapNotNullTo null
             }
-            JsonObject(match + mapOf("action" to JsonPrimitive("route"), "server" to JsonPrimitive(server)))
+            JsonObject(
+                match + buildMap {
+                    put("action", JsonPrimitive("route"))
+                    put("server", JsonPrimitive(server))
+                    if (proxyIpv4Only && server == SECURE_DNS_TAG) {
+                        put("strategy", JsonPrimitive(IPV4_ONLY_STRATEGY))
+                    }
+                },
+            )
+        }
+        if (proxyIpv4Only && automaticFinal(root, selectedProxyTag) == SECURE_DNS_TAG) {
+            result += catchAllDnsRule(SECURE_DNS_TAG, ipv4Only = true)
         }
         return result
     }
@@ -337,9 +361,10 @@ object RuntimeConfigBuilder {
             .flatMap { stringArray(it["ip_cidr"]) }
             .any { it == "0.0.0.0/0" || it == "::/0" }
 
-    private fun catchAllDnsRule(server: String): JsonObject = buildJsonObject {
+    private fun catchAllDnsRule(server: String, ipv4Only: Boolean = false): JsonObject = buildJsonObject {
         put("action", "route")
         put("server", server)
+        if (ipv4Only) put("strategy", IPV4_ONLY_STRATEGY)
     }
 
     private fun hijackDnsRule(): JsonObject = buildJsonObject {
@@ -526,6 +551,7 @@ object RuntimeConfigBuilder {
     private const val SECURE_DNS_TAG = "zapret-secure-dns"
     private const val BOOTSTRAP_DNS_TAG = "zapret-bootstrap-lkg"
     private const val HEALTH_PROBE_HOST = "connectivitycheck.gstatic.com"
+    private const val IPV4_ONLY_STRATEGY = "ipv4_only"
     private val GENERATED_DNS_SERVER_TAGS = setOf(
         ANDROID_DNS_TAG,
         DOH_1_TAG,

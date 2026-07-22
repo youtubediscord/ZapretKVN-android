@@ -262,6 +262,82 @@ class RuntimeConfigBuilderTest {
 
         assertEquals("zapret-android-dns", ru.string("server"))
         assertEquals("zapret-secure-dns", (dns["final"] as JsonPrimitive).content)
+        assertFalse(rules.any { it.string("strategy") == "ipv4_only" })
+    }
+
+    @Test
+    fun `optional IPv4 only filters secure DNS without changing direct DNS or stored JSON`() {
+        val stored = validConfig().replace(
+            "\"auto_detect_interface\":true,\"final\":\"zapret-proxy\"",
+            "\"auto_detect_interface\":true,\"rules\":[" +
+                "{\"domain_suffix\":[\".ru\"],\"action\":\"route\",\"outbound\":\"direct\"}," +
+                "{\"domain_suffix\":[\".proxy.test\"],\"action\":\"route\",\"outbound\":\"zapret-proxy\"}" +
+                "],\"final\":\"zapret-proxy\"",
+        )
+        val result = RuntimeConfigBuilder.build(
+            stored,
+            options = RuntimeConfigOptions(
+                dnsMode = DnsMode.Automatic,
+                proxyIpv4Only = true,
+            ),
+        ) as RuntimeConfigResult.Ready
+        val dns = (JsonConfig.parse(result.json) as JsonObject)["dns"] as JsonObject
+        val rules = (dns["rules"] as JsonArray).map { it as JsonObject }
+        val direct = rules.first { it["domain_suffix"]?.toString()?.contains(".ru") == true }
+        val secure = rules.first { it["domain_suffix"]?.toString()?.contains(".proxy.test") == true }
+        val secureFinal = rules.first {
+            it.string("server") == "zapret-secure-dns" && "domain_suffix" !in it
+        }
+
+        assertEquals("zapret-android-dns", direct.string("server"))
+        assertFalse("strategy" in direct)
+        assertEquals("zapret-secure-dns", secure.string("server"))
+        assertEquals("ipv4_only", secure.string("strategy"))
+        assertEquals("ipv4_only", secureFinal.string("strategy"))
+        assertEquals("prefer_ipv4", (dns["strategy"] as JsonPrimitive).content)
+        assertFalse("stored JSON must not gain a DNS strategy", "ipv4_only" in stored)
+
+        val android = RuntimeConfigBuilder.build(
+            validConfig(),
+            options = RuntimeConfigOptions(
+                dnsMode = DnsMode.Android,
+                proxyIpv4Only = true,
+            ),
+        ) as RuntimeConfigResult.Ready
+        val androidDns = (JsonConfig.parse(android.json) as JsonObject)["dns"] as JsonObject
+        assertFalse(
+            (androidDns["rules"] as JsonArray)
+                .map { it as JsonObject }
+                .any { it.string("strategy") == "ipv4_only" },
+        )
+
+        val directFinalStored = stored.replace(
+            "\"final\":\"zapret-proxy\"",
+            "\"final\":\"direct\"",
+        )
+        val directFinal = RuntimeConfigBuilder.build(
+            directFinalStored,
+            options = RuntimeConfigOptions(
+                dnsMode = DnsMode.Automatic,
+                proxyIpv4Only = true,
+            ),
+        ) as RuntimeConfigResult.Ready
+        val directFinalDns = (JsonConfig.parse(directFinal.json) as JsonObject)["dns"] as JsonObject
+        val directFinalRules = (directFinalDns["rules"] as JsonArray).map { it as JsonObject }
+
+        assertEquals("zapret-android-dns", directFinalDns.string("final"))
+        assertTrue(
+            directFinalRules.any {
+                it.string("server") == "zapret-secure-dns" &&
+                    it.string("strategy") == "ipv4_only" &&
+                    "domain_suffix" in it
+            },
+        )
+        assertFalse(
+            directFinalRules.any {
+                it.string("server") == "zapret-secure-dns" && "domain_suffix" !in it
+            },
+        )
     }
 
     @Test

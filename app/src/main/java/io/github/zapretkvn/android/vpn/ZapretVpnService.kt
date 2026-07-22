@@ -287,6 +287,7 @@ class ZapretVpnService : VpnService() {
                     enableTrafficStats = true,
                     options = RuntimeConfigOptions(
                         dnsMode = dnsMode,
+                        proxyIpv4Only = uiSettings.proxyIpv4Only,
                         bootstrapHost = preparedBootstrap.overlay,
                         vpnHiding = vpnHiding,
                     ),

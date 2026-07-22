@@ -32,6 +32,7 @@ data class UiSettings(
     val activeProfileId: String? = null,
     val rawEditorLineWrap: Boolean = false,
     val dnsMode: DnsMode = DnsMode.FromJson,
+    val proxyIpv4Only: Boolean = false,
     val updateChannel: UpdateChannel = UpdateChannel.Stable,
     val vpnHiding: VpnHidingOptions = VpnHidingOptions(),
 )
@@ -57,6 +58,7 @@ class UiSettingsStore(context: Context) {
                 dnsMode = preferences[DNS_MODE]
                     ?.let { stored -> DnsMode.entries.firstOrNull { it.name == stored } }
                     ?: DnsMode.FromJson,
+                proxyIpv4Only = preferences[PROXY_IPV4_ONLY] ?: false,
                 updateChannel = preferences[UPDATE_CHANNEL]
                     ?.let { stored -> UpdateChannel.entries.firstOrNull { it.name == stored } }
                     ?: UpdateChannel.Stable,
@@ -89,6 +91,10 @@ class UiSettingsStore(context: Context) {
         dataStore.edit { it[DNS_MODE] = mode.name }
     }
 
+    suspend fun setProxyIpv4Only(enabled: Boolean) {
+        dataStore.edit { it[PROXY_IPV4_ONLY] = enabled }
+    }
+
     suspend fun setUpdateChannel(channel: UpdateChannel) {
         dataStore.edit { it[UPDATE_CHANNEL] = channel.name }
     }
@@ -110,6 +116,7 @@ class UiSettingsStore(context: Context) {
         val ACTIVE_PROFILE_ID = stringPreferencesKey("active_profile_id")
         val RAW_EDITOR_LINE_WRAP = booleanPreferencesKey("raw_editor_line_wrap")
         val DNS_MODE = stringPreferencesKey("dns_mode")
+        val PROXY_IPV4_ONLY = booleanPreferencesKey("proxy_ipv4_only")
         val UPDATE_CHANNEL = stringPreferencesKey("update_channel")
         val VPN_HIDING_BLOCK_LOCAL_ENDPOINTS =
             booleanPreferencesKey("vpn_hiding_block_local_endpoints")

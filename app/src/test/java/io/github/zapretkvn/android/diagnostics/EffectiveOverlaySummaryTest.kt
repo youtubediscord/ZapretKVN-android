@@ -21,7 +21,7 @@ class EffectiveOverlaySummaryTest {
                 {"tag":"user-secret-dns","type":"https","server":"private.example"},
                 {"tag":"zapret-doh-1","type":"https","server":"203.0.113.9","detour":"zapret-proxy"},
                 {"tag":"zapret-bootstrap-lkg","type":"hosts","predefined":{"vpn.example":["198.51.100.4"]}}
-              ],"rules":[{"server":"zapret-doh-1","domain_suffix":["secret.example"]}]},
+              ],"rules":[{"server":"zapret-doh-1","strategy":"ipv4_only","domain_suffix":["secret.example"]}]},
               "route":{"rules":[
                 {"domain_suffix":["private.example"],"outbound":"direct"},
                 {"protocol":"dns","action":"hijack-dns"},
@@ -46,6 +46,7 @@ class EffectiveOverlaySummaryTest {
         assertEquals("0", (vpnHiding["non_tun_inbound_count"] as JsonPrimitive).content)
         assertFalse((vpnHiding["local_control_endpoint_present"] as JsonPrimitive).boolean)
         assertEquals(2, (summary["dns_servers"] as JsonArray).size)
+        assertTrue((summary["proxy_ipv4_only"] as JsonPrimitive).boolean)
         assertEquals("2", (summary["route_rule_count"] as JsonPrimitive).content)
         assertEquals("1", (summary["bootstrap_address_count"] as JsonPrimitive).content)
     }

@@ -223,6 +223,32 @@ private fun SettingsMain(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                HorizontalDivider()
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 56.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Только IPv4 через VPN")
+                        Text(
+                            "Убирает AAAA только из managed DoH через proxy. LAN, прямой DNS и режим «Из JSON» не меняются.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(
+                        checked = state.settings.proxyIpv4Only,
+                        onCheckedChange = viewModel::setProxyIpv4Only,
+                        enabled = state.settings.dnsMode == DnsMode.Automatic ||
+                            state.settings.dnsMode == DnsMode.Secure,
+                        modifier = Modifier.semantics {
+                            contentDescription = "Только IPv4 через VPN"
+                        },
+                    )
+                }
                 OutlinedButton(onClick = onClearDnsCache) { Text("Очистить DNS-кэш") }
                 Text(
                     "Удаляет bootstrap LKG и контролируемо перезапускает core. Кэш Android не очищается.",

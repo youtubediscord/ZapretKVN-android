@@ -56,6 +56,10 @@ object EffectiveOverlaySummary {
             buildJsonObject {
                 put("dns_mode", dnsMode.name)
                 put(
+                    "proxy_ipv4_only",
+                    managedDnsRules.any { it.string("strategy") == "ipv4_only" },
+                )
+                put(
                     "tun",
                     buildJsonObject {
                         put("present", tun != null)
