@@ -311,11 +311,10 @@ internal fun UpdateAvailableDialog(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Text("Изменения", style = MaterialTheme.typography.titleMedium)
-                Text(
+                ReleaseNotesMarkdown(
                     candidate.release.body.ifBlank {
                         "Автор релиза не добавил список изменений."
                     },
-                    style = MaterialTheme.typography.bodySmall,
                 )
             }
         },

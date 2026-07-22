@@ -37,7 +37,7 @@ class UpdateUiInstrumentedTest {
             release = GitHubRelease(
                 tag = "v0.2.0-test.12",
                 title = "Test 12",
-                body = "Исправлен Beta-канал и очистка APK.",
+                body = "### Поддержка форматирования\n\n**Важно:** исправлен Beta-канал и очистка APK.",
                 pageUrl = "https://github.com/release",
                 draft = false,
                 prerelease = true,
@@ -64,7 +64,9 @@ class UpdateUiInstrumentedTest {
         }
 
         composeRule.onNodeWithTag("update-available-dialog").assertExists()
-        composeRule.onNodeWithText("Исправлен Beta-канал и очистка APK.").assertExists()
+        composeRule.onNodeWithText("Поддержка форматирования").assertExists()
+        composeRule.onNodeWithText("Важно: исправлен Beta-канал и очистка APK.").assertExists()
+        composeRule.onNodeWithText("### Поддержка форматирования").assertDoesNotExist()
         composeRule.onNodeWithText("Скачать").assertExists()
         composeRule.onNodeWithText("Позже").assertExists()
     }
