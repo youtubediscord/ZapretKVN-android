@@ -67,7 +67,7 @@ class UiSettingsStore(context: Context) {
                     neutralSessionName = preferences[VPN_HIDING_NEUTRAL_SESSION_NAME] ?: false,
                     tunMtuMode = preferences[VPN_HIDING_TUN_MTU_MODE]
                         ?.let { stored -> TunMtuMode.entries.firstOrNull { it.name == stored } }
-                        ?: TunMtuMode.CoreDefault,
+                        ?: TunMtuMode.Normalize1500,
                 ),
             )
         }

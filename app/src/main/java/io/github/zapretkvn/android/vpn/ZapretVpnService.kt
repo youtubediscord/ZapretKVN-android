@@ -374,6 +374,9 @@ class ZapretVpnService : VpnService() {
                 },
             ).also(CommandClient::connect)
             check(token == controller.currentGeneration()) { "Запуск отменён." }
+            // Keep a bounded core log during startup so failed handshakes and DNS transports
+            // remain diagnosable. It is closed after health unless Diagnostics is visible.
+            resources.openLogClient(controller)
             controller.publish(token, VpnConnectionState.Starting(profileId, "Проверка DNS и HTTPS"))
             showForeground(ForegroundNotificationState.CheckingHealth)
             val dnsServer = resources.platform?.internalDnsServer
@@ -402,6 +405,7 @@ class ZapretVpnService : VpnService() {
             )
             startHomeStatusObserver(resources)
             startDiagnosticsObserver(resources)
+            if (!controller.diagnosticsVisible.value) resources.closeLogClient(controller)
             if (health.externalIpProbeAllowed) startConnectionIdentityProbe(resources)
         } catch (error: Throwable) {
             resources.close()
@@ -723,8 +727,8 @@ class ZapretVpnService : VpnService() {
         terminalError = true
         val failure = safeError(error)
         finishForeground()
-        if (startId > 0) stopSelfResult(startId) else stopSelf()
         controller.publish(token, failure)
+        if (startId > 0) stopSelfResult(startId) else stopSelf()
     }
 
     internal fun requestStopFromCore() {

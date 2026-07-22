@@ -51,6 +51,15 @@ object EffectiveOverlaySummary {
             ?.values
             ?.firstOrNull() as? JsonArray)
             ?.size ?: 0
+        val proxyDetourTags = managedDnsServers.mapNotNull { it.string("detour") }.toSet()
+        val proxyTransportTypes = listOf("outbounds", "endpoints")
+            .flatMap { key ->
+                (root[key] as? JsonArray)?.mapNotNull { it as? JsonObject }.orEmpty()
+            }
+            .filter { it.string("tag") in proxyDetourTags }
+            .mapNotNull { it.string("type") }
+            .map(::safeToken)
+            .distinct()
 
         return JsonConfig.format(
             buildJsonObject {
@@ -91,6 +100,10 @@ object EffectiveOverlaySummary {
                     },
                 )
                 put("dns_rule_count", managedDnsRules.size)
+                put(
+                    "proxy_transport_types",
+                    JsonArray(proxyTransportTypes.map(::JsonPrimitive)),
+                )
                 put("route_rule_count", managedRouteRules.size)
                 put(
                     "route_actions",

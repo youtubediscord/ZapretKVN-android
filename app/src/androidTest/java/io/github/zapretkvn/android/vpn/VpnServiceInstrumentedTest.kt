@@ -17,6 +17,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import io.github.zapretkvn.android.ZapretApplication
 import io.github.zapretkvn.android.config.ConfigAnalyzer
 import io.github.zapretkvn.android.config.DnsMode
+import io.github.zapretkvn.android.diagnostics.DiagnosticAttemptOutcome
 import io.github.zapretkvn.android.profiles.ProfileMetadata
 import io.github.zapretkvn.android.profiles.ProfileSource
 import io.github.zapretkvn.android.routing.InstalledRuleSets
@@ -712,6 +713,10 @@ class VpnServiceInstrumentedTest {
             val state = connectResult(container.vpnController, profile.id)
             assertTrue(state is VpnConnectionState.Error)
             assertTrue((state as VpnConnectionState.Error).message.contains("health-check"))
+            assertEquals(
+                DiagnosticAttemptOutcome.Failed,
+                container.vpnController.diagnostics.value.connectionAttempt?.outcome,
+            )
             awaitCompletelyIdle(context)
         } finally {
             VpnTestHooks.reset()

@@ -26,12 +26,14 @@ class VpnRuntimeHardeningTest {
             as RuntimeHardeningResult.Ready
         val experimental = result.root["experimental"] as JsonObject
         val clash = experimental["clash_api"] as JsonObject
+        val tun = (result.root["inbounds"] as JsonArray).single() as JsonObject
 
         assertFalse("external_controller" in clash)
         assertFalse("secret" in clash)
         assertEquals("rule", (clash["mode"] as JsonPrimitive).content)
         assertFalse("v2ray_api" in experimental)
         assertTrue("cache_file" in experimental)
+        assertEquals("1500", (tun["mtu"] as JsonPrimitive).content)
         assertTrue("source object must remain untouched", "v2ray_api" in source.toString())
     }
 

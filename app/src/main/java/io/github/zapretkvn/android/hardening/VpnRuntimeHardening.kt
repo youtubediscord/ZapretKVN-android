@@ -13,7 +13,7 @@ enum class TunMtuMode {
 data class VpnHidingOptions(
     val blockLocalEndpoints: Boolean = true,
     val neutralSessionName: Boolean = false,
-    val tunMtuMode: TunMtuMode = TunMtuMode.CoreDefault,
+    val tunMtuMode: TunMtuMode = TunMtuMode.Normalize1500,
 )
 
 sealed interface RuntimeHardeningResult {

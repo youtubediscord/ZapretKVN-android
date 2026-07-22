@@ -454,7 +454,7 @@ private fun VpnHidingSettings(
             )
         }
 
-        SettingsCard(title = "Экспериментальные признаки") {
+        SettingsCard(title = "Сетевые параметры") {
             VpnHidingSwitchRow(
                 title = "Нейтральное имя VPN-сессии",
                 subtitle = "Показывает «Системная сеть» вместо имени клиента в доступных Android-представлениях.",
@@ -1087,10 +1087,9 @@ private fun TunMtuMode.displayName(): String = when (this) {
 
 private fun TunMtuMode.description(): String = when (this) {
     TunMtuMode.CoreDefault ->
-        "Используется MTU профиля или Android-default ядра. Это самый совместимый режим."
+        "Используется MTU профиля или Android-default ядра. Выберите при проблемах совместимости."
     TunMtuMode.Normalize1500 ->
-        "Runtime принудительно использует MTU 1500. Может уменьшить простой MTU-фингерпринт, " +
-            "но требует проверки QUIC/UDP и расхода CPU на реальном устройстве."
+        "Используется по умолчанию: runtime ограничивает TUN до MTU 1500, не меняя JSON профиля."
 }
 
 private fun VpnConnectionState.diagnosticLabel(): String = when (this) {
