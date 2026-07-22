@@ -575,11 +575,12 @@ arm64 RC и незавершённая физическая матрица из 
 - [x] Hard process recreation: `scripts/verify-process-recreation.sh` пройден на API 26/36; после смерти процесса ноль session/core/TUN/callback/client, после нового connect ровно один экземпляр.
 - [x] Packaged `.srs`: exact CLI RU/non-RU domain/IPv4/IPv6, manifest/license/SHA, atomic repair; 50 089 байт, cold install 14 мс на AVD API 36.
 - [x] Routing lookup/cold-start CPU/RAM measurements выполнены на AVD API 26/36 и exact core benchmark.
+- [x] Test 18 собран локально из commit `e637391` для arm64-v8a, armeabi-v7a и x86_64 и опубликован отдельным GitHub prerelease с SHA-256/metadata.
 - [ ] Idle CPU/battery release-gate выполнен на физических устройствах.
 
-**Следующее действие:** опубликовать Test 18 и на том же WireGuard-профиле проверить
-Auto и DNS Android с включённым «Только IPv4 через VPN»; «Из JSON» проверить отдельно
-как неизменённую пользовательскую DNS-политику. После успешного подключения повторить
+**Следующее действие:** установить Test 18 и на том же WireGuard-профиле проверить Auto
+и DNS Android с включённым «Только IPv4 через VPN»; «Из JSON» проверить отдельно как
+неизменённую пользовательскую DNS-политику. После успешного подключения повторить
 смену Wi‑Fi/mobile и длительную сессию; затем остаются физическая
 матрица этапа 8 (captive portal, IPv6-only/NAT64, камера/HTTPS subscription,
 blocked-DNS/LKG/DoH, OEM per-app/routing и энергия) и production signing key по `SIGNING.md`.
