@@ -471,7 +471,7 @@ class VpnHealthPipeline(
     }
 
     private companion object {
-        const val HEALTH_TIMEOUT_MILLIS = 15_000L
+        const val HEALTH_TIMEOUT_MILLIS = 20_000L
         const val DNS_TIMEOUT_MILLIS = 2_500
         const val HTTPS_ENDPOINT_TIMEOUT_MILLIS = 4_000
         const val MAX_HTTPS_FAILURE_DETAIL_CHARS = 240

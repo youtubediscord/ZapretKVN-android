@@ -10,7 +10,8 @@
       {
         "domain": [
           "probe.example.net",
-          "probe.example.org"
+          "probe.example.org",
+          "probe.example.com"
         ],
         "action": "route",
         "server": "zapret-android-dns",
@@ -55,7 +56,8 @@
       {
         "domain": [
           "probe.example.net",
-          "probe.example.org"
+          "probe.example.org",
+          "probe.example.com"
         ],
         "action": "route",
         "outbound": "selected-proxy"

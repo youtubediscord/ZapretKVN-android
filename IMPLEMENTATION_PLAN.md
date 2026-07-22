@@ -160,11 +160,11 @@ MVP готов только когда выполнены все пункты:
 - [x] `I3-05` Реализовать четыре режима GUI: Автоматически, DNS Android, Защищённый через VPN, Из JSON.
 - [x] `I3-05A` Добавить включённый по умолчанию «Только IPv4 через VPN»: `ipv4_only` применяется к generated DNS rules proxy-доменов в Auto/Secure/Android DNS, не меняя direct/LAN, TUN IPv6 и режим «Из JSON»; пользователь может вернуть dual-stack, но WireGuard требует настоящий внутренний IPv6-адрес.
 - [x] `I3-06` Создать `RuntimeConfigBuilder`, который добавляет только `zapret-*` overlays и не меняет сохранённый JSON.
-- [x] `I3-07` В managed Auto/Secure использовать реальные IP, `reverse_mapping`, cache 4096 и DoH `fallback/parallel`; exact `sequential` не достигает резерва при зависшем основном DoH; FakeIP не создавать.
+- [x] `I3-07` В managed Auto/Secure использовать реальные IP, `reverse_mapping`, cache 4096 и три DoH (Cloudflare, Google, OpenDNS) через `fallback/parallel`; exact `sequential` не достигает резерва при зависшем основном DoH; FakeIP не создавать.
 - [x] `I3-08` Брать внутренний DNS через `TunOptions.GetDNSServerAddress()` и передавать его в `VpnService.Builder.addDnsServer()`.
 - [x] `I3-09` Перехватывать стандартный DNS правилом port 53 / `hijack-dns`; не обещать перехват DoT, встроенного DoH и mDNS.
 - [x] `I3-10` При strict Private DNS блокировать managed Auto/Secure до `establish()`; DNS Android разрешать только при active+validated strict, иначе fail-close без plaintext fallback; «Из JSON» не переписывать.
-- [x] `I3-11` Реализовать последовательный health pipeline: proxy socket, DNS через TUN, основной HTTPS probe и ровно один резервный endpoint только после ошибки.
+- [x] `I3-11` Реализовать последовательный health pipeline: proxy socket, DNS через TUN, HTTPS Cloudflare, затем Google и OpenDNS только после ошибок предыдущих endpoints.
 - [x] `I3-12` Показывать «Подключено» только после всех проверок; любая ошибка закрывает TUN.
 - [x] `I3-13` При смене сети или DNS/captive policy state обновлять underlying Network, сбрасывать transport и выполнять один контролируемый restart с debounce/generation token.
 - [x] `I3-14` Не добавлять периодический health-check, бесконечный retry или plaintext DNS fallback.
@@ -180,7 +180,7 @@ MVP готов только когда выполнены все пункты:
 - [x] Instrumented на AVD API 28/29/36: Private DNS off/automatic/strict working/strict broken; managed Auto/Secure блокируются до TUN, а поломка strict Android DNS во время активной сессии event-driven закрывает TUN без plaintext fallback.
 - [x] Instrumented на AVD: реальные Wi-Fi, mobile, Wi-Fi ↔ mobile и IPv6; один контролируемый restart на каждую смену; captive-portal fail-close покрыт детерминированной fault injection до TUN.
 - [ ] Physical lab: настоящий captive portal и IPv6-only/NAT64 на целевых устройствах/сетях.
-- [x] Instrumented: блокировка системного resolver с fresh/stale/no LKG; реальный managed DoH/proxy success, отказ обоих DoH при недоступном proxy и полная очистка lifecycle.
+- [x] Instrumented: блокировка системного resolver с fresh/stale/no LKG; реальный managed DoH/proxy success, отказ всех managed DoH при недоступном proxy и полная очистка lifecycle.
 - [ ] Physical lab: повторить blocked system DNS/LKG и DoH failure на реальной Wi-Fi/mobile сети, а не только через детерминированную fault injection.
 - [x] Instrumented: мёртвый внутренний DNS после TUN закрывает core/PFD; Android немедленно получает обычную non-VPN сеть и снова разрешает DNS.
 - [ ] Gate: вся матрица DNS ADR проходит, активный TUN никогда не остаётся с неработающим DNS.

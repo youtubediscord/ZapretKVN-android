@@ -26,11 +26,22 @@
         "detour": "selected-proxy"
       },
       {
+        "type": "https",
+        "tag": "zapret-doh-3",
+        "server": "208.67.222.222",
+        "tls": {
+          "enabled": true,
+          "server_name": "dns.opendns.com"
+        },
+        "detour": "selected-proxy"
+      },
+      {
         "type": "fallback",
         "tag": "zapret-secure-dns",
         "servers": [
           "zapret-doh-1",
-          "zapret-doh-2"
+          "zapret-doh-2",
+          "zapret-doh-3"
         ],
         "strategy": "parallel"
       }
@@ -91,7 +102,8 @@
       {
         "domain": [
           "probe.example.net",
-          "probe.example.org"
+          "probe.example.org",
+          "probe.example.com"
         ],
         "action": "route",
         "outbound": "selected-proxy"

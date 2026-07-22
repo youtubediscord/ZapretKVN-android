@@ -301,6 +301,15 @@ class RuntimeConfigBuilderTest {
 
         assertEquals("parallel", fallback.string("strategy"))
         assertEquals("1.1.1.1", servers.first { it.string("tag") == "zapret-doh-1" }.string("server"))
+        assertEquals("8.8.8.8", servers.first { it.string("tag") == "zapret-doh-2" }.string("server"))
+        assertEquals(
+            "208.67.222.222",
+            servers.first { it.string("tag") == "zapret-doh-3" }.string("server"),
+        )
+        assertEquals(
+            listOf("zapret-doh-1", "zapret-doh-2", "zapret-doh-3"),
+            (fallback["servers"] as JsonArray).map { (it as JsonPrimitive).content },
+        )
         assertFalse(servers.any { it.string("type") == "fakeip" })
         assertEquals("4096", (dns["cache_capacity"] as JsonPrimitive).content)
         assertTrue((dns["reverse_mapping"] as JsonPrimitive).boolean)
@@ -403,7 +412,7 @@ class RuntimeConfigBuilderTest {
             (it as JsonPrimitive).content
         }
         assertEquals(
-            listOf("cp.cloudflare.com", "connectivitycheck.gstatic.com"),
+            listOf("cp.cloudflare.com", "connectivitycheck.gstatic.com", "dns.opendns.com"),
             healthDomains,
         )
         val rebuiltAndroid = RuntimeConfigBuilder.build(
