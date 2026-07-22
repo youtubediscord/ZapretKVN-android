@@ -25,6 +25,7 @@ data class GitHubRelease(
     val draft: Boolean,
     val prerelease: Boolean,
     val assets: List<GitHubAsset>,
+    val publishedAt: String? = null,
 )
 
 data class ReleaseMetadata(
@@ -218,6 +219,7 @@ object UpdateJson {
             title = root.string("name")?.takeIf(String::isNotBlank) ?: root.requiredString("tag_name"),
             body = root.string("body").orEmpty().take(MAX_RELEASE_NOTES_CHARS),
             pageUrl = root.requiredString("html_url"),
+            publishedAt = root.string("published_at"),
             draft = root.requiredBoolean("draft"),
             prerelease = root.requiredBoolean("prerelease"),
             assets = assets,

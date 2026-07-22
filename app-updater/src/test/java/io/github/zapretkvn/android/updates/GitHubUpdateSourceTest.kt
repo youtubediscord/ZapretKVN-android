@@ -40,6 +40,32 @@ class GitHubUpdateSourceTest {
     }
 
     @Test
+    fun `beta selects newest publication when github semver order is stale`() {
+        val http = FakeHttp().apply {
+            text[LIST] = "[" +
+                release(
+                    prerelease = true,
+                    title = "Older SemVer-first prerelease",
+                    publishedAt = "2026-07-22T20:02:37Z",
+                ) + "," +
+                release(
+                    prerelease = true,
+                    title = "Newest published prerelease",
+                    publishedAt = "2026-07-22T20:23:04Z",
+                ) +
+                "]"
+            text[METADATA_URL] = metadata(SHA)
+            text[CHECKSUM_URL] = "$SHA  $APK"
+        }
+
+        val candidate = GitHubUpdateSource(REPOSITORY, APPLICATION_ID, http, listOf("arm64-v8a"))
+            .latest(UpdateChannel.Beta)
+
+        assertEquals("Newest published prerelease", candidate.release.title)
+        assertEquals("2026-07-22T20:23:04Z", candidate.release.publishedAt)
+    }
+
+    @Test
     fun `channels fail when only the opposite release kind exists`() {
         val onlyStable = FakeHttp().apply {
             text[LIST] = "[${release(prerelease = false)}]"
@@ -110,9 +136,14 @@ class GitHubUpdateSourceTest {
         const val V7_CHECKSUM_URL = "https://github.com/ZapretKVN/ZapretKVN/releases/download/v1.2.3/v7.sha256"
         const val SHA = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 
-        fun release(prerelease: Boolean) = """
+        fun release(
+            prerelease: Boolean,
+            title: String = "1.2.3",
+            publishedAt: String? = null,
+        ) = """
             {
-              "tag_name":"v1.2.3","name":"1.2.3","html_url":"https://github.com/ZapretKVN/ZapretKVN/releases/tag/v1.2.3",
+              "tag_name":"v1.2.3","name":"$title","html_url":"https://github.com/ZapretKVN/ZapretKVN/releases/tag/v1.2.3",
+              ${publishedAt?.let { "\"published_at\":\"$it\"," }.orEmpty()}
               "draft":false,"prerelease":$prerelease,
               "assets":[
                 {"name":"release-metadata.json","browser_download_url":"$METADATA_URL","size":500},

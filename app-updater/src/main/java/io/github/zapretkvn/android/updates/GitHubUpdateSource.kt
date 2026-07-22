@@ -173,6 +173,11 @@ class GitHubUpdateSource(
                     UpdateChannel.Beta -> release.prerelease
                 }
             }
+            // GitHub's release API can group prereleases by SemVer tag instead of
+            // publication time (for example, -test.* before a newer -beta.*).
+            // ISO-8601 UTC timestamps sort lexicographically; missing legacy values
+            // stay in the original stable API order behind timestamped releases.
+            .sortedByDescending { it.publishedAt.orEmpty() }
         if (releases.isEmpty()) throw UpdateException("В выбранном канале нет GitHub Releases.")
 
         return candidate(releases.first())

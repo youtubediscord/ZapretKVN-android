@@ -58,6 +58,7 @@ class UpdateJsonTest {
 
         assertEquals("v1.2.3", release.tag)
         assertEquals("Fixed updater", release.body)
+        assertEquals("2026-07-22T20:23:04Z", release.publishedAt)
         assertEquals(false, release.draft)
         assertEquals(true, release.prerelease)
         assertEquals("sha256:$SHA", release.assets[1].digest)
@@ -116,6 +117,7 @@ class UpdateJsonTest {
               "name":"Beta 1.2.3",
               "body":"Fixed updater",
               "html_url":"https://github.com/ZapretKVN/ZapretKVN/releases/tag/v1.2.3",
+              "published_at":"2026-07-22T20:23:04Z",
               "draft":false,
               "prerelease":true,
               "assets":[
