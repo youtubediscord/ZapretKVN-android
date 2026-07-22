@@ -32,6 +32,8 @@ data class TransportSettings(
     val path: String? = null,
     val host: String? = null,
     val serviceName: String? = null,
+    val mode: String? = null,
+    val xhttpOptions: JsonObject? = null,
 )
 
 object ProtocolOutboundBuilders {
@@ -192,6 +194,9 @@ object ProtocolOutboundBuilders {
         transport?.type.orEmpty(),
         transport?.path.orEmpty(),
         transport?.serviceName.orEmpty(),
+        transport?.takeIf { it.type == "xhttp" }?.host.orEmpty(),
+        transport?.mode.orEmpty(),
+        transport?.xhttpOptions?.toString().orEmpty(),
     ).joinToString("|")
 
     private fun kotlinx.serialization.json.JsonObjectBuilder.putTls(settings: TlsSettings) {
@@ -244,6 +249,12 @@ object ProtocolOutboundBuilders {
                 }
             }
             "grpc" -> serviceName?.takeIf(String::isNotBlank)?.let { put("service_name", it) }
+            "xhttp" -> {
+                mode?.takeIf(String::isNotBlank)?.let { put("mode", it) }
+                path?.takeIf(String::isNotBlank)?.let { put("path", it) }
+                host?.takeIf(String::isNotBlank)?.let { put("host", it) }
+                xhttpOptions?.forEach { (key, value) -> put(key, value) }
+            }
         }
     }
 }

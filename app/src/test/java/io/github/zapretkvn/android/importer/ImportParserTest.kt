@@ -225,6 +225,37 @@ class ImportParserTest {
         assertEquals("p@ss:word+plus", trojan.servers.single().outbound.string("password"))
     }
 
+    @Test
+    fun `vless xhttp maps mode host path alpn and extra to sing box transport`() {
+        val extra = Base64.getUrlEncoder().withoutPadding().encodeToString(
+            """{"xmux":{"maxConcurrency":"16-32","hKeepAlivePeriod":"10"},"noGRPCHeader":true,"xPaddingBytes":"100-1000","scMaxEachPostBytes":"1000000"}"""
+                .toByteArray(),
+        )
+        val candidate = ImportParser.parse(
+            "vless://11111111-1111-4111-8111-111111111111@xhttp.example:443" +
+                "?security=tls&sni=cdn.example&alpn=h2%2Chttp%2F1.1&type=xhttp" +
+                "&mode=stream-up&path=%2Fapi&host=cdn.example&extra=$extra#XHTTP",
+            ProfileSource.Clipboard,
+        ) as ImportCandidate.Managed
+        val outbound = candidate.servers.single().outbound
+        val transport = outbound["transport"] as JsonObject
+        val tls = outbound["tls"] as JsonObject
+        val xmux = transport["xmux"] as JsonObject
+
+        assertEquals("xhttp", transport.string("type"))
+        assertEquals("stream-up", transport.string("mode"))
+        assertEquals("/api", transport.string("path"))
+        assertEquals("cdn.example", transport.string("host"))
+        assertEquals("true", (transport["no_grpc_header"] as JsonPrimitive).content)
+        assertEquals("100-1000", transport.string("x_padding_bytes"))
+        assertEquals("16-32", xmux.string("max_concurrency"))
+        assertEquals("10", (xmux["h_keep_alive_period"] as JsonPrimitive).content)
+        assertEquals(
+            listOf("h2", "http/1.1"),
+            (tls["alpn"] as JsonArray).map { (it as JsonPrimitive).content },
+        )
+    }
+
     @Test(timeout = 5_000L)
     fun `parser rejects arbitrary bounded input without non-domain failures`() {
         val random = Random(0x5A17)
