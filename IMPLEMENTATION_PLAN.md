@@ -316,11 +316,15 @@ UI-настройка и не запускает фоновые обновлен
 
 Диагностика не является отдельным Gradle-модулем и не добавляет постоянного фонового сборщика. `CommandLog` подписывается
 отдельным клиентом на время connect health-check и при `Activity STARTED` с открытым
-экраном, хранит в памяти не более 80 redacted-строк текущего запуска и закрывается
-идемпотентно после успешной проверки, вместе с экраном или service. Runtime-лог на диск не пишется. Effective overlay — структурная
+экраном. В памяти остаются три последние попытки, до 40 startup core-строк на каждую
+и отдельные последние 80 общих строк; клиент закрывается идемпотентно после успешной
+проверки, вместе с экраном или service. Runtime-лог на диск не пишется. Effective overlay — структурная
 сводка managed `zapret-*`: режим DNS, наличие dual-stack TUN, типы managed DNS,
 количество правил/actions, локальные rule-set и bounded hardening-state без endpoint,
 match values или секретов.
+
+Вся suspend-цепочка connect/restart ограничена одним 30-секундным deadline. Timeout
+завершается fail-close с `VPN-120` и не создаёт периодический watchdog или retry-loop.
 
 Отчёт версии 2 создаётся только кнопкой, содержит app/core revision, Android/API,
 VPN/non-VPN network state, Private DNS, последнюю классифицированную ошибку, безопасный

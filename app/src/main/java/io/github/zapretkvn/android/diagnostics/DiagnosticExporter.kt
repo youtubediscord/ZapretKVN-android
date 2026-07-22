@@ -133,6 +133,12 @@ class DiagnosticExporter(
                 "connection_attempt",
                 diagnostics.connectionAttempt?.let(::connectionAttemptJson) ?: JsonNull,
             )
+            put(
+                "connection_attempts",
+                buildJsonArray {
+                    diagnostics.recentConnectionAttempts.forEach { add(connectionAttemptJson(it)) }
+                },
+            )
             put("previous_crash", crashJson(crashStore.read()))
             put(
                 "effective_overlay",
@@ -227,6 +233,7 @@ class DiagnosticExporter(
             put("started_at_epoch_ms", attempt.startedAtEpochMillis)
             put("outcome", attempt.outcome.code)
             attempt.totalDurationMillis?.let { put("total_duration_ms", it) }
+            put("failure", failureJson(attempt.failure))
             attempt.slowestCompletedStage?.let { slowest ->
                 put(
                     "slowest_stage",
@@ -253,7 +260,19 @@ class DiagnosticExporter(
                     }
                 },
             )
+            put(
+                "startup_core_logs",
+                buildJsonArray {
+                    attempt.startupCoreLogs.forEach { add(logLineJson(it)) }
+                },
+            )
         }
+
+    private fun logLineJson(line: DiagnosticLogLine): JsonObject = buildJsonObject {
+        put("received_at_epoch_ms", line.receivedAtEpochMillis)
+        put("level", line.levelName)
+        put("message", line.message)
+    }
 
     private fun crashJson(crash: AppCrashRecord?): JsonObject = buildJsonObject {
         put("present", crash != null)

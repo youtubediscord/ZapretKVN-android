@@ -107,7 +107,7 @@ expected = [
 ]
 if delays != expected:
     raise SystemExit(f"Unexpected production timer/retry surface: {delays!r}")
-print("Production timers are limited to visible session time, network debounce and bootstrap settle.")
+print("Production delay calls are limited to visible session time, network debounce and bootstrap settle.")
 PY
 
 python3 - "$MANIFEST" "$PROJECT_ROOT/app/src/main/res/xml/diagnostic_file_paths.xml" <<'PY'

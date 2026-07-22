@@ -124,6 +124,8 @@ data class DiagnosticConnectionAttempt(
     val totalDurationMillis: Long? = null,
     val outcome: DiagnosticAttemptOutcome = DiagnosticAttemptOutcome.Running,
     val stages: List<DiagnosticStageTiming> = emptyList(),
+    val startupCoreLogs: List<DiagnosticLogLine> = emptyList(),
+    val failure: DiagnosticFailure? = null,
 ) {
     val slowestCompletedStage: DiagnosticStageTiming?
         get() = stages
@@ -142,16 +144,25 @@ data class DiagnosticState(
     val vpnPolicy: DiagnosticVpnPolicy? = null,
     val effectiveOverlay: String? = null,
     val connectionAttempt: DiagnosticConnectionAttempt? = null,
+    val previousConnectionAttempts: List<DiagnosticConnectionAttempt> = emptyList(),
     val previousCrash: AppCrashRecord? = null,
 ) {
+    val recentConnectionAttempts: List<DiagnosticConnectionAttempt>
+        get() = (previousConnectionAttempts + listOfNotNull(connectionAttempt))
+            .takeLast(MAX_DIAGNOSTIC_ATTEMPTS)
+
     val logs: List<DiagnosticLogLine>
         get() = (applicationLogs + coreLogs)
             .sortedBy(DiagnosticLogLine::receivedAtEpochMillis)
             .takeLast(MAX_DIAGNOSTIC_LOG_LINES)
 }
 
-internal fun List<DiagnosticLogLine>.appendBounded(line: DiagnosticLogLine): List<DiagnosticLogLine> =
-    (this + line).takeLast(MAX_DIAGNOSTIC_LOG_LINES)
+internal fun List<DiagnosticLogLine>.appendBounded(
+    line: DiagnosticLogLine,
+    limit: Int = MAX_DIAGNOSTIC_LOG_LINES,
+): List<DiagnosticLogLine> = (this + line).takeLast(limit)
 
 const val MAX_DIAGNOSTIC_LOG_LINES = 80
+const val MAX_DIAGNOSTIC_STARTUP_LOG_LINES = 40
+const val MAX_DIAGNOSTIC_ATTEMPTS = 3
 const val MAX_DIAGNOSTIC_STAGES = 20

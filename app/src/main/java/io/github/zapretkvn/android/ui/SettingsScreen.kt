@@ -611,6 +611,11 @@ private fun DiagnosticsSettings(
                             MaterialTheme.colorScheme.onSurface
                         },
                     )
+                    Text(
+                        "Триггер: ${attempt.trigger}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                     attempt.stages.lastOrNull { it.status == DiagnosticStageStatus.Running }?.let { stage ->
                         Text(
                             "Сейчас: ${stage.label}",
@@ -646,6 +651,23 @@ private fun DiagnosticsSettings(
                                     },
                                 )
                             }
+                        }
+                    }
+                    if (diagnostics.previousConnectionAttempts.isNotEmpty()) {
+                        Text("Предыдущие попытки", fontWeight = FontWeight.SemiBold)
+                        diagnostics.previousConnectionAttempts.takeLast(2).asReversed().forEach { previous ->
+                            Text(
+                                "${previous.trigger}: " +
+                                    previous.outcome.diagnosticLabel(previous.totalDurationMillis) +
+                                    (previous.failure?.let { " · ${it.supportCode}" } ?: "") +
+                                    (previous.slowestCompletedStage?.let { " · ${it.label}" } ?: ""),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (previous.outcome == DiagnosticAttemptOutcome.Failed) {
+                                    MaterialTheme.colorScheme.error
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
+                            )
                         }
                     }
                 }

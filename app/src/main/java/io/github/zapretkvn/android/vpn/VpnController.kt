@@ -16,6 +16,8 @@ import io.github.zapretkvn.android.diagnostics.DiagnosticStageStatus
 import io.github.zapretkvn.android.diagnostics.DiagnosticStageTiming
 import io.github.zapretkvn.android.diagnostics.DiagnosticVpnPolicy
 import io.github.zapretkvn.android.diagnostics.AppCrashRecord
+import io.github.zapretkvn.android.diagnostics.MAX_DIAGNOSTIC_ATTEMPTS
+import io.github.zapretkvn.android.diagnostics.MAX_DIAGNOSTIC_STARTUP_LOG_LINES
 import io.github.zapretkvn.android.diagnostics.MAX_DIAGNOSTIC_STAGES
 import io.github.zapretkvn.android.diagnostics.SecretRedactor
 import io.github.zapretkvn.android.diagnostics.appendBounded
@@ -180,6 +182,9 @@ class VpnController(
         val elapsed = SystemClock.elapsedRealtime()
         val epoch = System.currentTimeMillis()
         mutableDiagnostics.update { current ->
+            val previous = current.connectionAttempt?.finishForReplacement(elapsed)
+            val history = (current.previousConnectionAttempts + listOfNotNull(previous))
+                .takeLast(MAX_DIAGNOSTIC_ATTEMPTS - 1)
             current.copy(
                 generation = generation,
                 lastFailure = null,
@@ -188,6 +193,7 @@ class VpnController(
                 network = null,
                 vpnPolicy = null,
                 effectiveOverlay = null,
+                previousConnectionAttempts = history,
                 connectionAttempt = DiagnosticConnectionAttempt(
                     generation = generation,
                     trigger = trigger.take(40),
@@ -352,7 +358,23 @@ class VpnController(
         val safe = sanitizeDiagnosticText(message, MAX_DIAGNOSTIC_LINE_CHARS)
         if (safe.isEmpty()) return
         val line = DiagnosticLogLine(level, safe, System.currentTimeMillis())
-        mutableDiagnostics.update { it.copy(coreLogs = it.coreLogs.appendBounded(line)) }
+        mutableDiagnostics.update { current ->
+            val attempt = current.connectionAttempt
+            val startupAttempt = if (attempt?.outcome == DiagnosticAttemptOutcome.Running) {
+                attempt.copy(
+                    startupCoreLogs = attempt.startupCoreLogs.appendBounded(
+                        line,
+                        MAX_DIAGNOSTIC_STARTUP_LOG_LINES,
+                    ),
+                )
+            } else {
+                attempt
+            }
+            current.copy(
+                coreLogs = current.coreLogs.appendBounded(line),
+                connectionAttempt = startupAttempt,
+            )
+        }
     }
 
     internal fun publishDiagnosticLogStream(generation: Long, active: Boolean) {
@@ -451,11 +473,18 @@ class VpnController(
                 )
                 val line = DiagnosticLogLine(level = 2, message = safe, receivedAtEpochMillis = now)
                 mutableDiagnostics.update {
+                    val attempt = it.connectionAttempt
+                    val failedAttempt = if (attempt?.generation == generation) {
+                        attempt.copy(failure = failure)
+                    } else {
+                        attempt
+                    }
                     it.copy(
                         generation = generation,
                         lastFailure = failure,
                         applicationLogs = it.applicationLogs.appendBounded(line),
                         logStreamActive = false,
+                        connectionAttempt = failedAttempt,
                     )
                 }
             }
@@ -506,6 +535,18 @@ class VpnController(
         } else {
             stage
         }
+    }
+
+    private fun DiagnosticConnectionAttempt.finishForReplacement(
+        elapsed: Long,
+    ): DiagnosticConnectionAttempt = if (outcome == DiagnosticAttemptOutcome.Running) {
+        copy(
+            totalDurationMillis = (elapsed - startedAtElapsedRealtimeMillis).coerceAtLeast(0L),
+            outcome = DiagnosticAttemptOutcome.Cancelled,
+            stages = stages.completeRunningStage(elapsed, DiagnosticStageStatus.Cancelled),
+        )
+    } else {
+        this
     }
 
     private fun appendApplicationDiagnosticLog(level: Int, message: String) {

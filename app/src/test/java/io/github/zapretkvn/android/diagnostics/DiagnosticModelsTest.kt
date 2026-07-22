@@ -60,6 +60,34 @@ class DiagnosticModelsTest {
     }
 
     @Test
+    fun `startup log ring and recent attempt history stay independently bounded`() {
+        val startup = (0 until 60).fold(emptyList<DiagnosticLogLine>()) { lines, index ->
+            lines.appendBounded(
+                DiagnosticLogLine(5, "startup-$index", index.toLong()),
+                MAX_DIAGNOSTIC_STARTUP_LOG_LINES,
+            )
+        }
+        val attempts = (1L..4L).map { generation ->
+            DiagnosticConnectionAttempt(
+                generation = generation,
+                trigger = "attempt-$generation",
+                startedAtEpochMillis = generation,
+                startedAtElapsedRealtimeMillis = generation,
+                outcome = DiagnosticAttemptOutcome.Connected,
+                startupCoreLogs = startup,
+            )
+        }
+        val state = DiagnosticState(
+            previousConnectionAttempts = attempts.take(3),
+            connectionAttempt = attempts.last(),
+        )
+
+        assertEquals(MAX_DIAGNOSTIC_STARTUP_LOG_LINES, startup.size)
+        assertEquals("startup-20", startup.first().message)
+        assertEquals(listOf(2L, 3L, 4L), state.recentConnectionAttempts.map { it.generation })
+    }
+
+    @Test
     fun `connection attempt exposes the slowest completed stage`() {
         val attempt = DiagnosticConnectionAttempt(
             generation = 7,

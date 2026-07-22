@@ -59,6 +59,7 @@ import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
 private data class UnderlyingPolicyKey(
     val identity: String?,
@@ -178,7 +179,7 @@ class ZapretVpnService : VpnService() {
                 activeSession = null
                 if (token != controller.currentGeneration()) return@withLock
                 try {
-                    startLocked(token, profileId)
+                    startWithDeadline(token, profileId)
                 } catch (error: Throwable) {
                     if (token == controller.currentGeneration()) {
                         failLocked(token, error, startId)
@@ -415,6 +416,18 @@ class ZapretVpnService : VpnService() {
             showForeground(ForegroundNotificationState.Connected)
     }
 
+    private suspend fun startWithDeadline(
+        token: Long,
+        profileId: String,
+        noCacheLookup: Boolean = false,
+    ) {
+        val completed = withTimeoutOrNull(CONNECTION_START_TIMEOUT_MILLIS) {
+            startLocked(token, profileId, noCacheLookup)
+            true
+        } == true
+        if (!completed) throw ConnectionStartupTimeoutException()
+    }
+
     private fun requestRestart(
         profileId: String,
         reason: String,
@@ -433,7 +446,7 @@ class ZapretVpnService : VpnService() {
                     return@withLock
                 }
                 terminalError = false
-                controller.beginConnectionDiagnostic(token, "restart")
+                controller.beginConnectionDiagnostic(token, restartDiagnosticTrigger(reason))
                 controller.startConnectionDiagnosticStage(
                     token,
                     "profile",
@@ -444,7 +457,7 @@ class ZapretVpnService : VpnService() {
                 activeSession?.close()
                 activeSession = null
                 try {
-                    startLocked(token, targetProfile, noCacheLookup)
+                    startWithDeadline(token, targetProfile, noCacheLookup)
                 } catch (error: Throwable) {
                     if (token == controller.currentGeneration()) failLocked(token, error, startId)
                 }
@@ -491,6 +504,19 @@ class ZapretVpnService : VpnService() {
                 )
             }
         }
+    }
+
+    private fun restartDiagnosticTrigger(reason: String): String = when (reason) {
+        "Смена сети Android" -> "network_change"
+        "Сброс DNS-состояния" -> "dns_cache_clear"
+        "Изменение маршрутизации" -> "routing_change"
+        "Подписка обновлена пользователем" -> "subscription_refresh"
+        "Смена режима DNS" -> "dns_mode_change"
+        "Смена IP-стратегии DNS" -> "dns_strategy_change"
+        "Смена защиты от localhost-чекеров" -> "endpoint_policy_change"
+        "Смена имени VPN-сессии" -> "session_name_change"
+        "Смена MTU для скрытия VPN" -> "mtu_change"
+        else -> "restart"
     }
 
     private fun requestStop(
@@ -559,7 +585,7 @@ class ZapretVpnService : VpnService() {
                     activeSession?.close()
                     activeSession = null
                     try {
-                        startLocked(restartToken, profileId)
+                        startWithDeadline(restartToken, profileId)
                     } catch (restartError: Throwable) {
                         if (restartToken == controller.currentGeneration()) {
                             restartError.addSuppressed(runtimeSwitchError)
@@ -959,6 +985,14 @@ class ZapretVpnService : VpnService() {
 
     private class RuntimeSwitchException(cause: Throwable) : Exception(cause)
 
+    private class ConnectionStartupTimeoutException : Exception(
+        "Подключение не завершилось за 30 секунд. VPN полностью остановлен; повторите после стабилизации сети.",
+    ), CodedFailure {
+        override val failureCode = "VPN-120"
+        override val userMessage = checkNotNull(message)
+        override val technicalDetail = "timeout_ms=$CONNECTION_START_TIMEOUT_MILLIS"
+    }
+
     private class ServerHandler(
         private val service: ZapretVpnService,
     ) : CommandServerHandler {
@@ -1095,6 +1129,7 @@ class ZapretVpnService : VpnService() {
         private const val NOTIFICATION_CHANNEL_ID = "vpn"
         private const val NOTIFICATION_ID = 1001
         private const val NETWORK_RESTART_DEBOUNCE_MILLIS = 750L
+        private const val CONNECTION_START_TIMEOUT_MILLIS = 30_000L
         private val NEW_LINES = Regex("[\\r\\n\\t]+")
 
         fun startIntent(context: Context, profileId: String): Intent =

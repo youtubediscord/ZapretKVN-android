@@ -13,6 +13,8 @@ import io.github.zapretkvn.android.vpn.VpnConnectionState
 import io.github.zapretkvn.android.vpn.VpnSystemPolicy
 import java.io.File
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -32,6 +34,13 @@ class DiagnosticExportInstrumentedTest {
         container.appCrashStore.clear()
         assertFalse("No report may exist before the explicit action", directory.exists())
 
+        val previousToken = container.vpnController.nextGeneration()
+        container.vpnController.beginConnectionDiagnostic(previousToken, "previous_test")
+        container.vpnController.startConnectionDiagnosticStage(previousToken, "profile", "Профиль")
+        container.vpnController.publish(
+            previousToken,
+            VpnConnectionState.Error("DNS через VPN не отвечает: previous test."),
+        )
         val token = container.vpnController.nextGeneration()
         try {
             container.vpnController.beginConnectionDiagnostic(token, "instrumented_test")
@@ -94,6 +103,16 @@ class DiagnosticExportInstrumentedTest {
             assertTrue("\"supported_by_app\": false" in report)
             assertTrue("\"effective_overlay\"" in report)
             assertTrue("\"connection_attempt\"" in report)
+            assertTrue("\"connection_attempts\"" in report)
+            assertTrue("\"startup_core_logs\"" in report)
+            assertTrue("\"support_code\": \"DNS-200\"" in report)
+            assertEquals(
+                2,
+                (JsonConfig.parse(report) as JsonObject)
+                    .getValue("connection_attempts")
+                    .let { it as JsonArray }
+                    .size,
+            )
             assertTrue("\"total_duration_ms\"" in report)
             assertTrue("\"dns_probe\"" in report)
             assertTrue("\"previous_crash\"" in report)
