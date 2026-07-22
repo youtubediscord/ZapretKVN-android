@@ -234,7 +234,7 @@ private fun SettingsMain(
                     Column(modifier = Modifier.weight(1f)) {
                         Text("Только IPv4 через VPN")
                         Text(
-                            "Убирает AAAA только из managed DoH через proxy. LAN, прямой DNS и режим «Из JSON» не меняются.",
+                            "Включено по умолчанию. Убирает AAAA только из managed DoH через proxy; выключите для IPv6-only сайтов. LAN, прямой DNS и режим «Из JSON» не меняются.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )

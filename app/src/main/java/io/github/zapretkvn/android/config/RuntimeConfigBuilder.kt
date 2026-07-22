@@ -21,7 +21,7 @@ enum class DnsMode {
 
 data class RuntimeConfigOptions(
     val dnsMode: DnsMode = DnsMode.FromJson,
-    val proxyIpv4Only: Boolean = false,
+    val proxyIpv4Only: Boolean = true,
     val bootstrapHost: BootstrapHostOverlay? = null,
     val vpnHiding: VpnHidingOptions = VpnHidingOptions(),
 )

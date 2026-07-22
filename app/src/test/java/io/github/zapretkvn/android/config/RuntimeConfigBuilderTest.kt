@@ -237,6 +237,7 @@ class RuntimeConfigBuilderTest {
         val root = JsonConfig.parse(result.json) as JsonObject
         val dns = root["dns"] as JsonObject
         val servers = (dns["servers"] as JsonArray).map { it as JsonObject }
+        val rules = (dns["rules"] as JsonArray).map { it as JsonObject }
         val fallback = servers.first { it.string("tag") == "zapret-secure-dns" }
 
         assertEquals("sequential", fallback.string("strategy"))
@@ -244,6 +245,12 @@ class RuntimeConfigBuilderTest {
         assertFalse(servers.any { it.string("type") == "fakeip" })
         assertEquals("4096", (dns["cache_capacity"] as JsonPrimitive).content)
         assertTrue((dns["reverse_mapping"] as JsonPrimitive).boolean)
+        assertTrue(
+            rules.any {
+                it.string("server") == "zapret-secure-dns" &&
+                    it.string("strategy") == "ipv4_only"
+            },
+        )
     }
 
     @Test
@@ -254,7 +261,10 @@ class RuntimeConfigBuilderTest {
         )
         val result = RuntimeConfigBuilder.build(
             stored,
-            options = RuntimeConfigOptions(dnsMode = DnsMode.Automatic),
+            options = RuntimeConfigOptions(
+                dnsMode = DnsMode.Automatic,
+                proxyIpv4Only = false,
+            ),
         ) as RuntimeConfigResult.Ready
         val dns = (JsonConfig.parse(result.json) as JsonObject)["dns"] as JsonObject
         val rules = (dns["rules"] as JsonArray).map { it as JsonObject }

@@ -32,7 +32,7 @@ data class UiSettings(
     val activeProfileId: String? = null,
     val rawEditorLineWrap: Boolean = false,
     val dnsMode: DnsMode = DnsMode.FromJson,
-    val proxyIpv4Only: Boolean = false,
+    val proxyIpv4Only: Boolean = true,
     val updateChannel: UpdateChannel = UpdateChannel.Stable,
     val vpnHiding: VpnHidingOptions = VpnHidingOptions(),
 )
@@ -58,7 +58,7 @@ class UiSettingsStore(context: Context) {
                 dnsMode = preferences[DNS_MODE]
                     ?.let { stored -> DnsMode.entries.firstOrNull { it.name == stored } }
                     ?: DnsMode.FromJson,
-                proxyIpv4Only = preferences[PROXY_IPV4_ONLY] ?: false,
+                proxyIpv4Only = preferences[PROXY_IPV4_ONLY] ?: true,
                 updateChannel = preferences[UPDATE_CHANNEL]
                     ?.let { stored -> UpdateChannel.entries.firstOrNull { it.name == stored } }
                     ?: UpdateChannel.Stable,
