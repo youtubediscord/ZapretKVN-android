@@ -77,6 +77,20 @@ private fun UnderlyingNetworkState.policyKey() = UnderlyingPolicyKey(
     strictPrivateDnsReady = privateDnsMode != PrivateDnsMode.Strict || (privateDnsActive && validated),
 )
 
+internal enum class NetworkRestartDecision {
+    KeepSession,
+    DebounceRestart,
+}
+
+internal object NetworkRestartPolicy {
+    fun <T> decide(sessionBaseline: T, observed: T): NetworkRestartDecision =
+        if (sessionBaseline == observed) {
+            NetworkRestartDecision.KeepSession
+        } else {
+            NetworkRestartDecision.DebounceRestart
+        }
+}
+
 class ZapretVpnService : VpnService() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val serviceLock = Mutex()
@@ -488,14 +502,27 @@ class ZapretVpnService : VpnService() {
         if (activeSession !== session) return
         controller.publishDiagnosticNetwork(session.generation, state)
         val nextPolicyKey = state.policyKey()
-        if (nextPolicyKey == session.networkPolicyKey) return
-        session.networkPolicyKey = nextPolicyKey
+        if (
+            NetworkRestartPolicy.decide(session.networkPolicyKey, nextPolicyKey) ==
+            NetworkRestartDecision.KeepSession
+        ) {
+            cancelScheduledNetworkRestart()
+            return
+        }
         synchronized(restartScheduleLock) {
             networkRestartJob?.cancel()
             networkRestartJob = serviceScope.launch {
                 delay(NETWORK_RESTART_DEBOUNCE_MILLIS)
                 val current = activeSession
                 if (current !== session || current.generation != controller.currentGeneration()) return@launch
+                if (
+                    NetworkRestartPolicy.decide(
+                        current.networkPolicyKey,
+                        current.networkMonitor.current.policyKey(),
+                    ) == NetworkRestartDecision.KeepSession
+                ) {
+                    return@launch
+                }
                 requestRestart(
                     profileId = current.profileId,
                     reason = "Смена сети Android",
@@ -848,7 +875,7 @@ class ZapretVpnService : VpnService() {
         val profileName: String,
         val generation: Long,
         val networkMonitor: DefaultNetworkMonitor,
-        @Volatile var networkPolicyKey: UnderlyingPolicyKey,
+        val networkPolicyKey: UnderlyingPolicyKey,
         val outboundDescriptions: Map<String, OutboundDescription>,
         selectorGroups: List<SelectorGroup>,
         private val controller: VpnController,

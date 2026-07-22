@@ -169,6 +169,9 @@ MVP готов только когда выполнены все пункты:
 - [x] `I3-14` Не добавлять периодический health-check, бесконечный retry или plaintext DNS fallback.
 - [x] `I3-15` Кнопку «Очистить DNS-кэш» реализовать контролируемым restart core, честно не обещая очистить Android resolver cache.
 
+`I3-13`: baseline текущей сессии неизменяем. Transient callback `A → B → A`
+отменяет pending restart, а итоговый policy key повторно проверяется после debounce.
+
 ### Тесты и Gate 3
 
 - [x] Unit/core: четыре DNS fixtures проходят exact CLI; JVM-тест подтверждает managed `fallback/sequential` без FakeIP.

@@ -127,6 +127,11 @@ Zapret KVN — независимый нативный Android-клиент sing
 
 Любая ошибка или revoke выполняет один идемпотентный stop: отмена callback/job, остановка core, закрытие PFD, очистка памяти, foreground stop. Терминальный `Error`/`Stopped` публикуется только после этого cleanup, чтобы немедленный повторный запуск не пересёкся со старым foreground startId на Android 8–9. Невыбранные приложения всё это время продолжают работать напрямую.
 
+Baseline underlying-сети остаётся неизменяемым на всю сессию. Callback-flap
+`A → B → A` отменяет pending restart; после 750 мс debounce итоговый policy key
+проверяется ещё раз. Контролируемый restart выполняется только если сеть или
+DNS/captive policy действительно остались отличными от baseline.
+
 ## Экраны
 
 ```text
