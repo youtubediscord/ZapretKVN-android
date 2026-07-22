@@ -582,6 +582,7 @@ arm64 RC и незавершённая физическая матрица из 
 - [x] Routing lookup/cold-start CPU/RAM measurements выполнены на AVD API 26/36 и exact core benchmark.
 - [x] Test 18 собран локально из commit `e637391` для arm64-v8a, armeabi-v7a и x86_64 и опубликован отдельным GitHub prerelease с SHA-256/metadata.
 - [x] Test 20 опубликован из commit `352fb31` с редактируемым DNS override; Auto DNS fallback в него ещё не входил.
+- [x] Test 21 собран локально из commit `d78ad72` для arm64-v8a, armeabi-v7a и x86_64 и опубликован с новой цепочкой Auto DNS, SHA-256 и metadata; физическая проверка остаётся открытой.
 - [ ] Idle CPU/battery release-gate выполнен на физических устройствах.
 
 **Следующее действие:** установить Test 21 и на том же WireGuard-профиле проверить Auto:
