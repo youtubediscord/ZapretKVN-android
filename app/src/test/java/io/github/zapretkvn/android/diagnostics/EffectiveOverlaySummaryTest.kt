@@ -61,6 +61,7 @@ class EffectiveOverlaySummaryTest {
             ((summary["proxy_transport_types"] as JsonArray).single() as JsonPrimitive).content,
         )
         assertEquals("1", (summary["wireguard_endpoint_count"] as JsonPrimitive).content)
+        assertEquals("1", (summary["wireguard_android_engine_count"] as JsonPrimitive).content)
         assertEquals(
             "1280",
             ((summary["wireguard_mtu_values"] as JsonArray).single() as JsonPrimitive).content,

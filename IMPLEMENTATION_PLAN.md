@@ -137,7 +137,7 @@ MVP готов только когда выполнены все пункты:
 - [x] `I2-16` Получать selector-группы/текущий server через libbox и переключать активный server вызовом `CommandClient.SelectOutbound()` без restart TUN/core.
 - [x] `I2-17` Перед switch собрать JSON с новым `selector.default`, выполнить `CheckConfig()` и атомарно сохранить; при ошибке runtime switch сделать один контролируемый restart.
 - [x] `I2-18` Для managed selector включить `interrupt_exist_connections=true`; проверить, что закрываются только proxy-соединения selector, а `direct` и приложения вне TUN не затрагиваются.
-- [x] `I2-18A` Поверх exact core commit применять один проверяемый Android patch, вызывающий WireGuard `DisableSomeRoamingForBrokenMobileSemantics()` после `IpcSet`; публиковать patch SHA-256 во всех build/release/diagnostic metadata и возвращать source checkout в чистое состояние после сборки. Physical A/B остаётся в `P16`.
+- [x] `I2-18A` Поверх exact core commit применять один проверяемый Android data-plane patch: vanilla WireGuard и AmneziaWG используют раздельные pinned движки metacubex, общий protected batch-1 ClientBind, roaming lock до peers и порядок `device → IPC → TUN Up`; публиковать версии модулей и patch SHA-256, а checkout возвращать чистым. Physical A/B остаётся в `P16`.
 
 ### Тесты и Gate 2
 
@@ -587,13 +587,14 @@ arm64 RC и незавершённая физическая матрица из 
 - [x] По отчётам Test 21 подтверждён Android WireGuard GRO/standard-bind сбой: handshake и первый DNS проходят, затем return data зависает. Runtime-only direct detour переводит endpoint без явного `detour` на `ClientBind`; health-route теперь обязателен во всех DNS-режимах, а профиль без DNS получает минимальный Android fallback. Exact pinned CLI и JVM regression tests проходят; физическая проверка остаётся открытой.
 - [x] Beta 23 опубликована из commit `6be23f4`, но проверка живого GitHub API показала, что старый updater сортирует `test.*` выше более нового `beta.*`; release и tag сохранены для аудита.
 - [x] Test 23 опубликован из commit `f602c19` для arm64-v8a, armeabi-v7a и x86_64 с versionCode `200123`, тем же debug signer, SHA-256 и updater metadata. Он дополнительно сортирует prerelease по `published_at` и находится первым для Test 21/22.
+- [x] Диагностика Test 23 доказала более широкий дефект pinned Android WireGuard: handshake и первый UDP DNS успешны, но TCP SYN/data-plane зависает; «Из JSON» давал ложный успех через direct IPv6. Android data-plane заменён без второго TUN на pinned vanilla/AWG движки metacubex, а WireGuard startup теперь синхронно проверяет выбранный concrete outbound через три bounded TCP/TLS endpoint.
 - [ ] Idle CPU/battery release-gate выполнен на физических устройствах.
 
-**Следующее действие:** установить Test 23 через Beta updater или GitHub Release и на том же WireGuard-профиле проверить
+**Следующее действие:** собрать и установить следующий prerelease и на том же WireGuard-профиле проверить
 «Из JSON», DNS Android, Auto и Secure. В effective overlay должны быть
-`wireguard_client_bind_detour_count=1`, IPv4 default allowed и точный inner MTU; Auto больше
-не имеет права завершиться через прямой IPv6 health-path. На VLESS «Из JSON» профиль без
-DNS должен получить только runtime local DNS Android. После успешного подключения повторить
+`wireguard_android_engine_count=1`, отсутствие сгенерированного compatibility detour,
+IPv4 default allowed и точный inner MTU. Стадия `wireguard_data_plane` должна либо
+подтвердить concrete outbound, либо завершить запуск `VPN-200`, не объявляя direct IPv6 успехом. После успешного подключения повторить
 смену Wi‑Fi/mobile и длительную сессию; затем остаются физическая
 матрица этапа 8 (captive portal, IPv6-only/NAT64, камера/HTTPS subscription,
 blocked-DNS/LKG/DoH, OEM per-app/routing и энергия) и production signing key по `SIGNING.md`.

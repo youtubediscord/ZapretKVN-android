@@ -118,13 +118,13 @@ Zapret KVN — независимый нативный Android-клиент sing
 4. Прочитать профиль и создать runtime-копию JSON.
 5. Проверить один TUN, полные IPv4/IPv6 routes, rule-set assets и запрещённые socket bind-поля.
 6. Очистить импортированные `include_package`/`exclude_package` только в runtime-копии и применить одну глобальную allowlist.
-7. Добавить только разрешённые runtime overlays: health-check, при необходимости bootstrap LKG, минимальный Android DNS для профиля без DNS и Android WireGuard `ClientBind` compatibility detour.
+7. Добавить только разрешённые runtime overlays: health-check, при необходимости bootstrap LKG, минимальный Android DNS для профиля без DNS и внутренний WireGuard MTU, если он отсутствует.
 8. Выполнить `libbox CheckConfig()` до `establish()`.
 9. Проверить captive portal/Private DNS и разрешить адрес активного proxy-сервера через underlying Android network.
 10. Создать platform adapter и локальный libbox command server в том же Android process.
 11. Вызвать `startOrReloadService()`: libbox синхронно вызывает `OpenTun(TunOptions)`, а adapter создаёт один `VpnService.Builder`, применяет приложения, адреса, полные routes и внутренний DNS.
 12. `Builder.establish()` возвращает Android PFD; libbox дублирует его FD и запускает единственный core поверх этого же TUN. Второго адаптера или второго TUN здесь нет.
-13. Проверить соединение с сервером, DNS через VPN и HTTPS endpoints. В Auto подтверждённая именно DNS-ошибка полностью закрывает текущие core/PFD/callbacks и запускает следующий кандидат `профиль → Android → DoH`; максимум три попытки внутри общего deadline 45 секунд. Ошибка proxy, JSON или HTTPS-пути не считается DNS-ошибкой и не запускает переключение.
+13. Для WireGuard синхронно проверить TCP+TLS именно через выбранный конкретный outbound; затем проверить DNS и HTTPS через Android TUN. В Auto подтверждённая именно DNS-ошибка полностью закрывает текущие core/PFD/callbacks и запускает следующий кандидат `профиль → Android → DoH`; максимум три попытки внутри общего deadline 45 секунд. Ошибка data-plane, JSON или HTTPS-пути не считается DNS-ошибкой и не запускает переключение.
 14. Только после успеха показать «Подключено»; сбор 1 Hz session-only статистики начать лишь при видимой главной.
 
 Любая ошибка или revoke выполняет один идемпотентный stop: отмена callback/job, остановка core, закрытие PFD, очистка памяти, foreground stop. Терминальный `Error`/`Stopped` публикуется только после этого cleanup, чтобы немедленный повторный запуск не пересёкся со старым foreground startId на Android 8–9. Невыбранные приложения всё это время продолжают работать напрямую.
@@ -653,7 +653,7 @@ Gate: APK не выпускается при failed fixture, instrumented test, 
 | P13 | Цена status/traffic tracking и bounded logs | Сравнить главную видимую/закрытую, status 1 Гц/выключен, diagnostics stream закрыт/открыт; измерить CPU, allocations и GC | Только totals на главной; никогда не подписываться на connections; log stream только в диагностике |
 | P14 | GC=100 против GC=10 и риск памяти | Сравнить CPU, GC count/pause и PSS/RSS под длительной TCP/UDP/QUIC нагрузкой | `SetMemoryLimit(false)`; менять только при доказанном OOM и выигрыше без роста энергии |
 | P15 | Цена надёжного DNS fallback на физических устройствах | Cache burst и уникальные имена; сравнить принятый `parallel` с `sequential` по энергии и запросам, не возвращая заведомо сломанный hang-path | Managed default `parallel`; кэш 4096; без периодических проверок и plaintext fallback |
-| P16 | Стабильность Android WireGuard roaming patch после исправленного handshake | Test 17 подтвердил ответ handshake; повторить длительную сессию, mobile/network switch и IPv4/IPv6-capable profiles | Patch остаётся; не смешивать подтверждённый handshake с отдельными DNS/IPv6/health ошибками |
+| P16 | Стабильность нового Android WireGuard/AWG data-plane | Test 23 доказал старую неисправность после handshake; проверить новый split engine во всех DNS-режимах, затем длительную сессию, mobile/network switch и IPv4/IPv6-capable profiles | Один Android TUN и pinned patch; до физического теста исправление не объявлять подтверждённым |
 
 Критерий для P2–P4 и P12–P15: одного удачного speed test недостаточно. Нужны минимум пять повторов на слабом API 26 устройстве и одном современном устройстве без регрессии DNS, IPv6, QUIC и стабильности. Разница менее 5% не оправдывает усложнение архитектуры.
 

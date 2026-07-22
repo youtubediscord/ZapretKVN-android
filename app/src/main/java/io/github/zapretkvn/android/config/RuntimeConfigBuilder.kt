@@ -198,21 +198,10 @@ object RuntimeConfigBuilder {
         return RuntimeConfigResult.Ready(runtime)
     }
 
-    /**
-     * Applies Android-only userspace WireGuard compatibility to the runtime copy.
-     * The endpoint keeps an explicit MTU/detour; otherwise it gets the conservative
-     * Amnezia MTU and a direct detour that selects sing-box ClientBind instead of GRO.
-     */
+    /** Applies the conservative Amnezia MTU to Android's runtime copy only. */
     private fun applyAndroidWireGuardCompatibility(root: JsonObject): JsonObject {
         val endpoints = root["endpoints"] as? JsonArray ?: return root
-        val storedOutbounds = (root["outbounds"] as? JsonArray)?.toList().orEmpty()
-        val occupiedTags = storedOutbounds.mapNotNull { (it as? JsonObject)?.string("tag") }.toSet()
-        val clientBindTag = generateSequence(ANDROID_WIREGUARD_DIRECT_TAG) { current ->
-            val suffix = current.substringAfterLast('-', missingDelimiterValue = "1").toIntOrNull() ?: 1
-            "$ANDROID_WIREGUARD_DIRECT_TAG-${suffix + 1}"
-        }.first { it !in occupiedTags }
         var changed = false
-        var needsClientBind = false
         val runtimeEndpoints = JsonArray(endpoints.map { element ->
             val endpoint = element as? JsonObject
             if (endpoint?.string("type") != "wireguard") return@map element
@@ -221,31 +210,11 @@ object RuntimeConfigBuilder {
                 runtimeEndpoint["mtu"] = JsonPrimitive(ANDROID_WIREGUARD_MTU)
                 changed = true
             }
-            if (endpoint.boolean("system") != true && endpoint.string("detour").isNullOrBlank()) {
-                // The standard WireGuard bind enables GRO on Android. It can complete the
-                // handshake while dropping or severely delaying return traffic on real devices.
-                // A direct detour selects sing-box ClientBind (batch size 1) without changing
-                // the saved profile or routing application traffic through a second proxy.
-                runtimeEndpoint["detour"] = JsonPrimitive(clientBindTag)
-                needsClientBind = true
-                changed = true
-            }
             JsonObject(runtimeEndpoint)
         })
         if (!changed) return root
         return JsonObject(root.toMutableMap().apply {
             this["endpoints"] = runtimeEndpoints
-            if (needsClientBind) {
-                this["outbounds"] = JsonArray(
-                    storedOutbounds + buildJsonObject {
-                        put("type", "direct")
-                        put("tag", clientBindTag)
-                        // Makes the detour non-empty and lets Android's platform network
-                        // strategy select/protect the real Wi-Fi or cellular interface.
-                        put("network_strategy", "default")
-                    },
-                )
-            }
         })
     }
 
@@ -773,7 +742,6 @@ object RuntimeConfigBuilder {
     private val PROXY_DNS_MODES = setOf(DnsMode.Automatic, DnsMode.Secure)
     private const val ANDROID_DNS_TAG = "zapret-android-dns"
     private const val ANDROID_WIREGUARD_MTU = 1280
-    private const val ANDROID_WIREGUARD_DIRECT_TAG = "zapret-wireguard-direct"
     private const val DOH_1_TAG = "zapret-doh-1"
     private const val DOH_2_TAG = "zapret-doh-2"
     private const val DOH_3_TAG = "zapret-doh-3"

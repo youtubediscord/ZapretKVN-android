@@ -130,6 +130,10 @@ object EffectiveOverlaySummary {
                 )
                 put("wireguard_endpoint_count", wireGuardEndpoints.size)
                 put(
+                    "wireguard_android_engine_count",
+                    wireGuardEndpoints.count { it.boolean("system") != true },
+                )
+                put(
                     "wireguard_mtu_values",
                     JsonArray(
                         wireGuardEndpoints.mapNotNull { endpoint ->

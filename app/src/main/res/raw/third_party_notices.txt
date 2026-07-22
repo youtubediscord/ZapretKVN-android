@@ -4,8 +4,8 @@
 
 - Source: <https://github.com/shtorm-7/sing-box-extended>
 - Pinned commit: `ff11f007ec798136a5de258f947a4f34011a37ea`
-- Android patch: `core-patches/0001-android-disable-wireguard-endpoint-roaming.patch`
-- Patch SHA-256: `715e79e0b03d499be36dc5dbb8ee5b10b3138a0dbaea338c11c911a02f7fb171`
+- Android patch: `core-patches/0001-android-wireguard-data-plane.patch`
+- Patch SHA-256: `fb7166c3f0953f80dac31d4039577fc06f31061fd9fedbc9488cb41da8eb04a1`
 - License: GNU General Public License version 3 or later.
 - Copyright: 2022 nekohasekai and contributors.
 
@@ -16,6 +16,32 @@ The exact pinned license text, including the additional naming condition, is
 also retained as an application raw resource and as a CI core artifact.
 The patch is applied only after verifying the pinned checkout and patch hash,
 is recorded separately from the upstream revision, and is reversed after compilation.
+
+## Android WireGuard data-plane
+
+- Vanilla engine: <https://github.com/MetaCubeX/wireguard-go>, commit represented by module version `v0.0.0-20250820062549-a6cecdd7f57f`.
+- AmneziaWG engine: <https://github.com/MetaCubeX/amneziawg-go>, commit represented by module version `v0.0.0-20260612143004-19b4f1cdd5ec`.
+- License: MIT for both modules; their complete license text is reproduced below.
+
+```text
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the "Software"), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
+of the Software, and to permit persons to whom the Software is furnished to do
+so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
 
 ## SagerNet sing-geoip rule-set
 

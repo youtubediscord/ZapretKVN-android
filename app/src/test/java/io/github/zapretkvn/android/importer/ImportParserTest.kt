@@ -69,7 +69,7 @@ class ImportParserTest {
         val runtimeEndpoint = (fromJsonRoot["endpoints"] as JsonArray).single() as JsonObject
         val runtimeRouteRules = ((fromJsonRoot["route"] as JsonObject)["rules"] as JsonArray)
             .map { it as JsonObject }
-        assertEquals("zapret-wireguard-direct", runtimeEndpoint.string("detour"))
+        assertEquals(null, runtimeEndpoint.string("detour"))
         assertTrue(
             runtimeRouteRules.any {
                 it.string("outbound") == "wireguard-out" &&

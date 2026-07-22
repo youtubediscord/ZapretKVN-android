@@ -44,16 +44,20 @@ MTU TUN по умолчанию остаётся 1500, а для WireGuard/Amnez
 применяется Android-совместимый внутренний MTU 1280, как в официальном клиенте
 Amnezia. Явное значение из `.conf` или JSON всегда имеет приоритет.
 
-Android AAR также применяет один открытый воспроизводимый patch поверх pinned commit:
-как официальный AmneziaWG backend, он запрещает WireGuard менять peer endpoint после
-аутентифицированных пакетов на Android. Upstream commit и отдельный SHA-256 patchset
-публикуются в диагностике и release metadata.
+Android AAR применяет один открытый воспроизводимый patch поверх pinned commit. Только
+Android userspace WireGuard data-plane использует раздельные движки, проверенные в
+mihomo: `metacubex/wireguard-go` для обычного WireGuard и
+`metacubex/amneziawg-go` для AmneziaWG. Оба работают через один защищённый
+однопакетный `ClientBind`; второй Android TUN, локальный SOCKS и отдельный VPN service
+не создаются. До добавления peers отключается изменение endpoint после
+аутентифицированных пакетов, затем применяется IPC-конфигурация и только после неё
+поднимается внутренний TUN. Pinned версии модулей, upstream commit и SHA-256 patchset
+публикуются в build/release metadata.
 
-Для userspace WireGuard endpoint без собственного `detour` runtime-копия добавляет
-отдельный `zapret-wireguard-direct` outbound. Это сохраняет прямой внешний UDP-путь,
-но заставляет pinned sing-box использовать однопакетный `ClientBind` вместо проблемного
-Android GRO bind, при котором handshake может пройти, а обратный трафик — зависнуть.
-Сохранённый JSON не меняется; явный пользовательский `detour` всегда имеет приоритет.
+Runtime-копия добавляет WireGuard только внутренний MTU 1280, если профиль не задал
+свой. Искусственный `zapret-wireguard-direct` outbound больше не создаётся: Android
+движок сам использует защищённый dialer sing-box, а явный пользовательский `detour`
+сохраняет своё обычное значение. Сохранённый JSON не меняется.
 
 ## Скрытие VPN без root
 

@@ -11,6 +11,8 @@ source "$PROJECT_ROOT/scripts/core-patchset.sh"
 : "${CORE_COMMIT:?Missing CORE_COMMIT}"
 : "${CORE_PATCH_FILE:?Missing CORE_PATCH_FILE}"
 : "${CORE_PATCH_SHA256:?Missing CORE_PATCH_SHA256}"
+: "${ANDROID_WIREGUARD_GO:?Missing ANDROID_WIREGUARD_GO}"
+: "${ANDROID_AMNEZIAWG_GO:?Missing ANDROID_AMNEZIAWG_GO}"
 : "${GO_VERSION:?Missing GO_VERSION}"
 : "${GOMOBILE_VERSION:?Missing GOMOBILE_VERSION}"
 : "${ANDROID_NDK_VERSION:?Missing ANDROID_NDK_VERSION}"
@@ -133,6 +135,15 @@ cleanup_source_artifacts
 apply_core_patchset "$PROJECT_ROOT" "$SOURCE_DIR"
 CORE_PATCH_APPLIED=true
 
+for expected_module in "$ANDROID_WIREGUARD_GO" "$ANDROID_AMNEZIAWG_GO"; do
+    module_path="${expected_module%@*}"
+    actual_module="$(go list -m -f '{{.Path}}@{{.Version}}' "$module_path")"
+    if [[ "$actual_module" != "$expected_module" ]]; then
+        echo "Android WireGuard module mismatch: expected $expected_module, got $actual_module" >&2
+        exit 1
+    fi
+done
+
 # The host-only verifier does not need naive/Cronet. Android libbox below is still
 # built by the pinned upstream builder with its complete Android tag set.
 CORE_TAGS="with_gvisor,with_quic,with_wireguard,with_masque,with_mtproxy,with_trusttunnel,with_openvpn,with_sudoku,with_snell,with_utls,with_clash_api,badlinkname,tfogo_checklinkname0"
@@ -166,6 +177,7 @@ ZAPRET_RU_IP_SRS="$PROJECT_ROOT/app/src/main/assets/rule-sets/zapret-ru-ip.srs" 
         | tee "$OUTPUT_DIR/rule-set-benchmark.txt"
 rm -f "$SOURCE_DIR/route/rule/zapret_performance_test.go"
 go test ./dns/... ./route/rule ./experimental/libbox
+go test -tags "$CORE_TAGS" ./transport/wireguard ./protocol/wireguard
 
 go install "github.com/sagernet/gomobile/cmd/gomobile@$GOMOBILE_VERSION"
 go install "github.com/sagernet/gomobile/cmd/gobind@$GOMOBILE_VERSION"
@@ -202,6 +214,8 @@ cat > "$OUTPUT_DIR/core-build-metadata.json" <<EOF
   "commit": "$CORE_COMMIT",
   "patch_file": "$CORE_PATCH_FILE",
   "patch_sha256": "$CORE_PATCH_SHA256",
+  "android_wireguard_go": "$ANDROID_WIREGUARD_GO",
+  "android_amneziawg_go": "$ANDROID_AMNEZIAWG_GO",
   "go": "$GO_VERSION",
   "gomobile": "$GOMOBILE_VERSION",
   "android_ndk": "$ANDROID_NDK_VERSION",
@@ -216,6 +230,8 @@ CORE_TAG=$CORE_TAG
 CORE_COMMIT=$CORE_COMMIT
 CORE_PATCH_FILE=$CORE_PATCH_FILE
 CORE_PATCH_SHA256=$CORE_PATCH_SHA256
+ANDROID_WIREGUARD_GO=$ANDROID_WIREGUARD_GO
+ANDROID_AMNEZIAWG_GO=$ANDROID_AMNEZIAWG_GO
 LIBBOX_SHA256=$LIBBOX_SHA256
 EOF
 

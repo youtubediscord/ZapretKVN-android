@@ -34,6 +34,12 @@ class DiagnosticModelsTest {
                 "HTTPS-проверка через VPN не прошла: истёк тайм-аут 5000 мс.",
             ),
         )
+        assertEquals(
+            DiagnosticErrorType.VpnTraffic,
+            DiagnosticFailureClassifier.classify(
+                "WireGuard data-plane не прошёл проверку TCP/TLS.",
+            ),
+        )
         assertEquals("VPN-200", DiagnosticErrorType.VpnTraffic.supportCode)
         assertEquals("DNS-100", DiagnosticErrorType.SystemDns.supportCode)
         assertEquals(

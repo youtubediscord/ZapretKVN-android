@@ -64,7 +64,7 @@ class RuntimeConfigBuilderTest {
     }
 
     @Test
-    fun `wireguard gets Android mtu and client bind detour only in runtime`() {
+    fun `wireguard gets Android mtu only in runtime`() {
         val stored = validConfig(
             rootExtra = """
                 ,"endpoints":[
@@ -79,37 +79,14 @@ class RuntimeConfigBuilderTest {
         val root = JsonConfig.parse(result.json) as JsonObject
         val endpoints = (root["endpoints"] as JsonArray)
             .map { it as JsonObject }
-        val outbounds = (root["outbounds"] as JsonArray).map { it as JsonObject }
-        val clientBind = outbounds.single { it.string("tag") == "zapret-wireguard-direct" }
 
         assertEquals("1280", (endpoints[0]["mtu"] as JsonPrimitive).content)
-        assertEquals("zapret-wireguard-direct", endpoints[0].string("detour"))
+        assertEquals(null, endpoints[0].string("detour"))
         assertEquals("1376", (endpoints[1]["mtu"] as JsonPrimitive).content)
         assertEquals("custom-direct", endpoints[1].string("detour"))
         assertFalse("mtu" in endpoints[2])
-        assertEquals("direct", clientBind.string("type"))
-        assertEquals("default", clientBind.string("network_strategy"))
         assertFalse("stored profile must stay untouched", "1280" in stored)
-        assertFalse("stored profile must not gain the compatibility detour", "zapret-wireguard-direct" in stored)
-    }
-
-    @Test
-    fun `wireguard compatibility detour avoids user tag collisions`() {
-        val stored = validConfig(
-            rootExtra = """
-                ,"endpoints":[{"type":"wireguard","tag":"wg"}]
-            """.trimIndent(),
-        ).replace(
-            "{\"type\":\"direct\",\"tag\":\"direct\"}",
-            "{\"type\":\"direct\",\"tag\":\"direct\"}," +
-                "{\"type\":\"direct\",\"tag\":\"zapret-wireguard-direct\"}",
-        )
-
-        val result = RuntimeConfigBuilder.build(stored) as RuntimeConfigResult.Ready
-        val root = JsonConfig.parse(result.json) as JsonObject
-        val endpoint = (root["endpoints"] as JsonArray).single() as JsonObject
-
-        assertEquals("zapret-wireguard-direct-2", endpoint.string("detour"))
+        assertFalse("stored profile must not gain a detour", "zapret-wireguard-direct" in stored)
     }
 
     @Test

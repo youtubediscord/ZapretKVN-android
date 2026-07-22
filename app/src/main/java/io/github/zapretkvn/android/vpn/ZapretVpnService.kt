@@ -458,6 +458,41 @@ class ZapretVpnService : VpnService() {
                 },
             ).also(CommandClient::connect)
             check(token == controller.currentGeneration()) { "Запуск отменён." }
+            preparedBootstrap.target
+                ?.takeIf { it.outboundType == "wireguard" }
+                ?.let { wireGuardTarget ->
+                    controller.startConnectionDiagnosticStage(
+                        token,
+                        "wireguard_data_plane",
+                        "WireGuard TCP/TLS через выбранный outbound",
+                    )
+                    try {
+                        withContext(Dispatchers.IO) {
+                            checkNotNull(resources.client).urlTest(wireGuardTarget.outboundTag)
+                        }
+                        controller.finishConnectionDiagnosticStage(
+                            generation = token,
+                            key = "wireguard_data_plane",
+                            status = DiagnosticStageStatus.Success,
+                            detail = "outbound=${wireGuardTarget.outboundTag}",
+                        )
+                    } catch (error: Throwable) {
+                        controller.finishConnectionDiagnosticStage(
+                            generation = token,
+                            key = "wireguard_data_plane",
+                            status = DiagnosticStageStatus.Failed,
+                            detail = generateSequence(error) { it.cause }
+                                .last()
+                                .javaClass
+                                .simpleName
+                                .take(80),
+                        )
+                        throw IllegalStateException(
+                            "WireGuard data-plane не прошёл проверку TCP/TLS.",
+                            error,
+                        )
+                    }
+                }
             // Keep a bounded core log during startup so failed handshakes and DNS transports
             // remain diagnosable. It is closed after health unless Diagnostics is visible.
             controller.startConnectionDiagnosticStage(token, "core_log", "Снимок bounded core-лога")
