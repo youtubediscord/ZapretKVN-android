@@ -324,6 +324,7 @@ class ZapretVpnService : VpnService() {
                     options = RuntimeConfigOptions(
                         dnsMode = dnsMode,
                         proxyIpv4Only = uiSettings.proxyIpv4Only,
+                        dnsOverride = uiSettings.dnsOverride,
                         bootstrapHost = preparedBootstrap.overlay,
                         vpnHiding = vpnHiding,
                         updaterPackageName = packageName.takeIf { updaterRouting },

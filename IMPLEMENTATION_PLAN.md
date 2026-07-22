@@ -159,6 +159,7 @@ MVP готов только когда выполнены все пункты:
 - [x] `I3-04` Детектировать Private DNS off/automatic/strict через `LinkProperties`; системную настройку никогда не менять.
 - [x] `I3-05` Реализовать четыре режима GUI: Автоматически, DNS Android, Защищённый через VPN, Из JSON.
 - [x] `I3-05A` Добавить включённый по умолчанию «Только IPv4 через VPN»: `ipv4_only` применяется к generated DNS rules proxy-доменов в Auto/Secure/Android DNS, не меняя direct/LAN, TUN IPv6 и режим «Из JSON»; пользователь может вернуть dual-stack, но WireGuard требует настоящий внутренний IPv6-адрес.
+- [x] `I3-05B` Добавить одну глобальную редактируемую пару DNS override для managed-режимов, по умолчанию включённую как `ntc.party → 130.255.77.28`: `hosts` и точное правило стоят после `reject`, но до resolver rules; «Из JSON», routing, TLS/SNI и встроенный DoH не меняются, diagnostic не раскрывает пару.
 - [x] `I3-06` Создать `RuntimeConfigBuilder`, который добавляет только `zapret-*` overlays и не меняет сохранённый JSON.
 - [x] `I3-07` В managed Auto/Secure использовать реальные IP, `reverse_mapping`, cache 4096 и три DoH (Cloudflare, Google, OpenDNS) через `fallback/parallel`; exact `sequential` не достигает резерва при зависшем основном DoH; FakeIP не создавать.
 - [x] `I3-08` Брать внутренний DNS через `TunOptions.GetDNSServerAddress()` и передавать его в `VpnService.Builder.addDnsServer()`.

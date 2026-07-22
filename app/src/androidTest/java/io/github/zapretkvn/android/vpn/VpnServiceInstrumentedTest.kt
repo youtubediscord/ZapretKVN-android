@@ -17,6 +17,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import io.github.zapretkvn.android.ZapretApplication
 import io.github.zapretkvn.android.config.ConfigAnalyzer
 import io.github.zapretkvn.android.config.DnsMode
+import io.github.zapretkvn.android.config.DnsOverride
 import io.github.zapretkvn.android.diagnostics.DiagnosticAttemptOutcome
 import io.github.zapretkvn.android.diagnostics.DiagnosticStageStatus
 import io.github.zapretkvn.android.profiles.ProfileMetadata
@@ -892,6 +893,53 @@ class VpnServiceInstrumentedTest {
         } finally {
             stopIfNeeded(container.vpnController, context)
             container.uiSettingsStore.setDnsMode(DnsMode.FromJson)
+            container.profileStore.delete(profile.id)
+            denyVpn(packageName)
+        }
+    }
+
+    @Test
+    fun defaultDnsOverrideResolvesNtcPartyAndPreservesHttpsIdentity() = runBlocking {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val context = instrumentation.targetContext
+        val container = (context.applicationContext as ZapretApplication).container
+        val packageName = context.packageName
+        allowVpn(packageName)
+        shell("settings put global private_dns_mode off")
+        container.appSelectionStore.replaceAllowlist(setOf("com.android.settings"))
+        container.uiSettingsStore.setDnsMode(DnsMode.Android)
+        container.uiSettingsStore.setDnsOverride(
+            DnsOverride.DEFAULT_HOSTNAME,
+            DnsOverride.DEFAULT_IPV4_ADDRESS,
+        )
+        container.uiSettingsStore.setDnsOverrideEnabled(true)
+        val profile = createProfile(container, "DNS override", TWO_SERVER_DIRECT_CONFIG)
+        try {
+            VpnTestHooks.reset()
+            val before = container.vpnController.state.value
+            container.vpnController.start(profile.id)
+            withTimeout(10_000) { container.vpnController.state.first { it != before } }
+            val terminal = withTimeout(25_000) {
+                container.vpnController.state.first {
+                    it is VpnConnectionState.Connected || it is VpnConnectionState.Error
+                }
+            }
+            assertTrue("Managed Android DNS failed: $terminal", terminal is VpnConnectionState.Connected)
+
+            val dns = GateTrafficClient.tunDns(DnsOverride.DEFAULT_HOSTNAME)
+            assertTrue("Override DNS failed: ${dns.error}", dns.success)
+            assertEquals(DnsOverride.DEFAULT_IPV4_ADDRESS, dns.resolvedAddress)
+            val https = GateTrafficClient.https(DnsOverride.DEFAULT_HOSTNAME)
+            assertTrue("Override HTTPS failed: ${https.error}", https.success)
+            assertEquals(DnsOverride.DEFAULT_IPV4_ADDRESS, https.resolvedAddress)
+        } finally {
+            stopIfNeeded(container.vpnController, context)
+            container.uiSettingsStore.setDnsMode(DnsMode.FromJson)
+            container.uiSettingsStore.setDnsOverride(
+                DnsOverride.DEFAULT_HOSTNAME,
+                DnsOverride.DEFAULT_IPV4_ADDRESS,
+            )
+            container.uiSettingsStore.setDnsOverrideEnabled(true)
             container.profileStore.delete(profile.id)
             denyVpn(packageName)
         }

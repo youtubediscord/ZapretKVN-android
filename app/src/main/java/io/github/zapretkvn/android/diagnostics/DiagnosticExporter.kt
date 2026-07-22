@@ -6,6 +6,7 @@ import android.content.Intent
 import android.os.Build
 import androidx.core.content.FileProvider
 import io.github.zapretkvn.android.BuildConfig
+import io.github.zapretkvn.android.config.DnsMode
 import io.github.zapretkvn.android.config.JsonConfig
 import io.github.zapretkvn.android.ui.UiSettingsStore
 import io.github.zapretkvn.android.vpn.DefaultNetworkMonitor
@@ -131,6 +132,10 @@ class DiagnosticExporter(
                 buildJsonObject {
                     put("mode", settings.dnsMode.name)
                     put("proxy_ipv4_only", settings.proxyIpv4Only)
+                    put(
+                        "override_active",
+                        settings.dnsOverride.enabled && settings.dnsMode != DnsMode.FromJson,
+                    )
                     put("private_dns_mode", network.privateDnsMode)
                     put("private_dns_active", network.privateDnsActive)
                 },

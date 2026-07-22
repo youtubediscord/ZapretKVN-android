@@ -280,11 +280,81 @@ class RuntimeConfigBuilderTest {
         val servers = dns["servers"] as JsonArray
         val routeRules = ((root["route"] as JsonObject)["rules"] as JsonArray)
 
-        assertEquals(listOf("zapret-android-dns"), servers.map { (it as JsonObject).string("tag") })
+        assertEquals(
+            listOf("zapret-android-dns", "zapret-dns-override"),
+            servers.map { (it as JsonObject).string("tag") },
+        )
         assertEquals("zapret-android-dns", (dns["final"] as JsonPrimitive).content)
         assertTrue(routeRules.any { (it as JsonObject).string("action") == "hijack-dns" })
         assertTrue((root["unknown_dns_owner"] as JsonPrimitive).boolean)
         assertFalse("stored JSON must not be rewritten", "zapret-android-dns" in stored)
+    }
+
+    @Test
+    fun `managed DNS override is exact normalized and ordered after reject`() {
+        val stored = validConfig(
+            rootExtra = """
+                ,"dns":{"rules":[{"domain":["blocked.test"],"action":"reject"}]}
+            """.trimIndent(),
+        )
+        val result = RuntimeConfigBuilder.build(
+            stored,
+            options = RuntimeConfigOptions(
+                dnsMode = DnsMode.Secure,
+                dnsOverride = DnsOverride(
+                    hostname = " NTC.PARTY. ",
+                    ipv4Address = " 130.255.77.28 ",
+                ),
+            ),
+        ) as RuntimeConfigResult.Ready
+        val root = JsonConfig.parse(result.json) as JsonObject
+        val dns = root["dns"] as JsonObject
+        val servers = (dns["servers"] as JsonArray).map { it as JsonObject }
+        val rules = (dns["rules"] as JsonArray).map { it as JsonObject }
+        val overrideServer = servers.single { it.string("tag") == "zapret-dns-override" }
+        val predefined = overrideServer["predefined"] as JsonObject
+
+        assertEquals("130.255.77.28", (((predefined["ntc.party"] as JsonArray).single()) as JsonPrimitive).content)
+        assertEquals("reject", rules[0].string("action"))
+        assertEquals("zapret-dns-override", rules[1].string("server"))
+        assertTrue(rules[1]["domain"].toString().contains("ntc.party"))
+        assertFalse("stored profile must stay untouched", "zapret-dns-override" in stored)
+    }
+
+    @Test
+    fun `disabled override and FromJson do not add managed hosts`() {
+        val stored = validConfig()
+        val disabled = RuntimeConfigBuilder.build(
+            stored,
+            options = RuntimeConfigOptions(
+                dnsMode = DnsMode.Android,
+                dnsOverride = DnsOverride(enabled = false),
+            ),
+        ) as RuntimeConfigResult.Ready
+        val fromJson = RuntimeConfigBuilder.build(
+            stored,
+            options = RuntimeConfigOptions(
+                dnsMode = DnsMode.FromJson,
+                dnsOverride = DnsOverride(),
+            ),
+        ) as RuntimeConfigResult.Ready
+
+        assertFalse("zapret-dns-override" in disabled.json)
+        assertFalse("zapret-dns-override" in fromJson.json)
+    }
+
+    @Test
+    fun `invalid enabled override fails before core start`() {
+        val result = RuntimeConfigBuilder.build(
+            validConfig(),
+            options = RuntimeConfigOptions(
+                dnsMode = DnsMode.Android,
+                dnsOverride = DnsOverride(hostname = "bad host", ipv4Address = "999.1.1.1"),
+            ),
+        )
+
+        assertTrue(result is RuntimeConfigResult.Invalid)
+        assertTrue((result as RuntimeConfigResult.Invalid).message.contains("DNS-переопределение"))
     }
 
     @Test

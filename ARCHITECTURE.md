@@ -243,7 +243,7 @@ Whole-app block не входит в основной MVP: он потребов
 
 ```text
 DataStore
-├─ тема / канал обновлений / DNS-режим
+├─ тема / канал обновлений / bounded DNS runtime-настройки
 ├─ активный профиль
 └─ глобальная per-app allowlist и include/exclude mode
 

@@ -6,6 +6,8 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import io.github.zapretkvn.android.BuildConfig
 import io.github.zapretkvn.android.ZapretApplication
+import io.github.zapretkvn.android.config.DnsMode
+import io.github.zapretkvn.android.config.DnsOverride
 import io.github.zapretkvn.android.config.JsonConfig
 import io.github.zapretkvn.android.vpn.PrivateDnsMode
 import io.github.zapretkvn.android.vpn.UnderlyingNetworkState
@@ -32,6 +34,12 @@ class DiagnosticExportInstrumentedTest {
         val directory = File(context.cacheDir, DiagnosticExporter.DIRECTORY_NAME)
         exporter.cleanupStaleFiles()
         container.appCrashStore.clear()
+        container.uiSettingsStore.setDnsMode(DnsMode.Automatic)
+        container.uiSettingsStore.setDnsOverride(
+            DnsOverride.DEFAULT_HOSTNAME,
+            DnsOverride.DEFAULT_IPV4_ADDRESS,
+        )
+        container.uiSettingsStore.setDnsOverrideEnabled(true)
         assertFalse("No report may exist before the explicit action", directory.exists())
 
         val previousToken = container.vpnController.nextGeneration()
@@ -100,6 +108,7 @@ class DiagnosticExportInstrumentedTest {
             assertTrue(BuildConfig.CORE_COMMIT in report)
             assertTrue(BuildConfig.CORE_PATCH_SHA256 in report)
             assertTrue("\"private_dns_mode\"" in report)
+            assertTrue("\"override_active\": true" in report)
             assertTrue("\"vpn_system_policy\"" in report)
             assertTrue("\"supported_by_app\": false" in report)
             assertTrue("\"effective_overlay\"" in report)
@@ -128,6 +137,8 @@ class DiagnosticExportInstrumentedTest {
             assertFalse("123e4567-e89b-12d3-a456-426614174000" in report)
             assertFalse("com.example.hidden" in report)
             assertFalse("203.0.113.7" in report)
+            assertFalse(DnsOverride.DEFAULT_HOSTNAME in report)
+            assertFalse(DnsOverride.DEFAULT_IPV4_ADDRESS in report)
             assertFalse("allowed_packages" in report)
             assertFalse(directory.exists())
 
@@ -153,6 +164,7 @@ class DiagnosticExportInstrumentedTest {
         } finally {
             exporter.cleanupStaleFiles()
             container.appCrashStore.clear()
+            container.uiSettingsStore.setDnsMode(DnsMode.FromJson)
             container.vpnController.publish(token, VpnConnectionState.Stopped)
         }
         assertFalse(directory.exists())

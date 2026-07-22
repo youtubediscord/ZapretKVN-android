@@ -18,6 +18,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.zapretkvn.android.MainActivity
 import io.github.zapretkvn.android.ZapretApplication
 import io.github.zapretkvn.android.config.DnsMode
+import io.github.zapretkvn.android.config.DnsOverride
 import io.github.zapretkvn.android.hardening.TunMtuMode
 import io.github.zapretkvn.android.updates.UpdateChannel
 import io.github.zapretkvn.android.vpn.VpnConnectionState
@@ -44,6 +45,11 @@ class ProfileUiInstrumentedTest {
         container.profileStore.profiles.value.forEach { container.profileStore.delete(it.id) }
         container.uiSettingsStore.setActiveProfile(null)
         container.uiSettingsStore.setDnsMode(DnsMode.FromJson)
+        container.uiSettingsStore.setDnsOverride(
+            DnsOverride.DEFAULT_HOSTNAME,
+            DnsOverride.DEFAULT_IPV4_ADDRESS,
+        )
+        container.uiSettingsStore.setDnsOverrideEnabled(true)
         container.uiSettingsStore.setUpdateChannel(UpdateChannel.Stable)
         container.uiSettingsStore.setVpnHidingBlockLocalEndpoints(true)
         container.uiSettingsStore.setVpnHidingNeutralSessionName(false)
@@ -57,6 +63,11 @@ class ProfileUiInstrumentedTest {
         container.profileStore.profiles.value.forEach { container.profileStore.delete(it.id) }
         container.uiSettingsStore.setActiveProfile(null)
         container.uiSettingsStore.setDnsMode(DnsMode.FromJson)
+        container.uiSettingsStore.setDnsOverride(
+            DnsOverride.DEFAULT_HOSTNAME,
+            DnsOverride.DEFAULT_IPV4_ADDRESS,
+        )
+        container.uiSettingsStore.setDnsOverrideEnabled(true)
         container.uiSettingsStore.setUpdateChannel(UpdateChannel.Stable)
         container.uiSettingsStore.setVpnHidingBlockLocalEndpoints(true)
         container.uiSettingsStore.setVpnHidingNeutralSessionName(false)
@@ -154,6 +165,41 @@ class ProfileUiInstrumentedTest {
                 }
             }
         }
+    }
+
+    @Test
+    fun settingsEditDisableAndPersistDnsOverride() {
+        runBlocking { container.uiSettingsStore.setDnsMode(DnsMode.Secure) }
+        composeRule.onNode(hasText("Настройки") and hasClickAction()).performClick()
+        composeRule.onNodeWithTag("settings-list")
+            .performScrollToNode(hasText("ntc.party → 130.255.77.28"))
+        composeRule.onNodeWithText("ntc.party → 130.255.77.28").assertExists()
+        composeRule.onNodeWithTag("dns-override-edit").performScrollTo().performClick()
+        composeRule.waitUntil(UI_TIMEOUT_MILLIS) {
+            composeRule.onAllNodes(hasSetTextAction()).fetchSemanticsNodes().size == 2
+        }
+        composeRule.onAllNodes(hasSetTextAction())[0]
+            .performTextReplacement("Example.TEST.")
+        composeRule.onAllNodes(hasSetTextAction())[1]
+            .performTextReplacement("203.0.113.8")
+        composeRule.onNodeWithText("Сохранить").performClick()
+        composeRule.waitUntil(UI_TIMEOUT_MILLIS) {
+            runBlocking {
+                container.uiSettingsStore.settings.first().dnsOverride.let {
+                    it.hostname == "example.test" && it.ipv4Address == "203.0.113.8"
+                }
+            }
+        }
+        composeRule.onNodeWithContentDescription("DNS-переопределение включено").performClick()
+        composeRule.waitUntil(UI_TIMEOUT_MILLIS) {
+            runBlocking { !container.uiSettingsStore.settings.first().dnsOverride.enabled }
+        }
+
+        composeRule.activityRule.scenario.recreate()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("settings-list")
+            .performScrollToNode(hasText("example.test → 203.0.113.8"))
+        composeRule.onNodeWithText("example.test → 203.0.113.8").assertExists()
     }
 
     @Test

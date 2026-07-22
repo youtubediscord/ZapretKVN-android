@@ -21,6 +21,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.ElevatedCard
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
@@ -30,8 +31,10 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
@@ -53,6 +56,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
 import io.github.zapretkvn.android.BuildConfig
 import io.github.zapretkvn.android.config.DnsMode
+import io.github.zapretkvn.android.config.DnsOverride
 import io.github.zapretkvn.android.diagnostics.DiagnosticAttemptOutcome
 import io.github.zapretkvn.android.diagnostics.DiagnosticState
 import io.github.zapretkvn.android.diagnostics.DiagnosticStageStatus
@@ -148,6 +152,18 @@ private fun SettingsMain(
     onCancelUpdate: () -> Unit,
     onOpen: (SettingsDestination) -> Unit,
 ) {
+    var editDnsOverride by rememberSaveable { mutableStateOf(false) }
+    if (editDnsOverride) {
+        DnsOverrideDialog(
+            current = state.settings.dnsOverride,
+            onDismiss = { editDnsOverride = false },
+            onSave = { hostname, ipv4Address ->
+                viewModel.setDnsOverride(hostname, ipv4Address)
+                editDnsOverride = false
+            },
+        )
+    }
+
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
@@ -250,6 +266,45 @@ private fun SettingsMain(
                         },
                     )
                 }
+                HorizontalDivider()
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 56.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("DNS-переопределение")
+                        Text(
+                            "${state.settings.dnsOverride.hostname} → ${state.settings.dnsOverride.ipv4Address}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(
+                        checked = state.settings.dnsOverride.enabled,
+                        onCheckedChange = viewModel::setDnsOverrideEnabled,
+                        modifier = Modifier.semantics {
+                            contentDescription = "DNS-переопределение включено"
+                        },
+                    )
+                }
+                Text(
+                    if (state.settings.dnsMode == DnsMode.FromJson) {
+                        "Сохранено, но не применяется в режиме «Из JSON»."
+                    } else {
+                        "Точный домен получает указанный IPv4 до обращения к DNS. Встроенный DoH/DoT приложения может обойти правило."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                OutlinedButton(
+                    onClick = { editDnsOverride = true },
+                    modifier = Modifier.testTag("dns-override-edit"),
+                ) {
+                    Text("Изменить DNS-переопределение")
+                }
                 OutlinedButton(onClick = onClearDnsCache) { Text("Очистить DNS-кэш") }
                 Text(
                     "Удаляет bootstrap LKG и контролируемо перезапускает core. Кэш Android не очищается.",
@@ -314,6 +369,67 @@ private fun SettingsMain(
             }
         }
     }
+}
+
+@Composable
+private fun DnsOverrideDialog(
+    current: DnsOverride,
+    onDismiss: () -> Unit,
+    onSave: (String, String) -> Unit,
+) {
+    var hostname by rememberSaveable(current.hostname) { mutableStateOf(current.hostname) }
+    var ipv4Address by rememberSaveable(current.ipv4Address) { mutableStateOf(current.ipv4Address) }
+    val validationMessage = DnsOverride.validationMessage(hostname, ipv4Address)
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("DNS-переопределение") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedTextField(
+                    value = hostname,
+                    onValueChange = { hostname = it },
+                    label = { Text("Точный домен") },
+                    singleLine = true,
+                    isError = DnsOverride.validationMessage(hostname, DnsOverride.DEFAULT_IPV4_ADDRESS) != null,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("dns-override-hostname")
+                        .semantics { contentDescription = "Домен DNS-переопределения" },
+                )
+                OutlinedTextField(
+                    value = ipv4Address,
+                    onValueChange = { ipv4Address = it },
+                    label = { Text("IPv4-адрес") },
+                    singleLine = true,
+                    isError = DnsOverride.validationMessage(DnsOverride.DEFAULT_HOSTNAME, ipv4Address) != null,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("dns-override-ipv4")
+                        .semantics { contentDescription = "IPv4 DNS-переопределения" },
+                )
+                Text(
+                    validationMessage
+                        ?: "HTTPS продолжит проверять исходное имя домена и его сертификат.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (validationMessage == null) {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    } else {
+                        MaterialTheme.colorScheme.error
+                    },
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onSave(hostname, ipv4Address) },
+                enabled = validationMessage == null,
+            ) { Text("Сохранить") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Отмена") }
+        },
+    )
 }
 
 @Composable

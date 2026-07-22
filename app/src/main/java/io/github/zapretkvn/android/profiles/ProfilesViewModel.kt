@@ -425,6 +425,16 @@ class ProfilesViewModel(
         vpnController.restartIfConnected("Смена IP-стратегии DNS")
     }
 
+    fun setDnsOverrideEnabled(enabled: Boolean) = operation(markBusy = false) {
+        settingsStore.setDnsOverrideEnabled(enabled)
+        vpnController.restartIfConnected("Смена DNS-переопределения")
+    }
+
+    fun setDnsOverride(hostname: String, ipv4Address: String) = operation(markBusy = false) {
+        settingsStore.setDnsOverride(hostname, ipv4Address)
+        vpnController.restartIfConnected("Смена DNS-переопределения")
+    }
+
     fun setUpdateChannel(channel: UpdateChannel) = operation(markBusy = false) {
         settingsStore.setUpdateChannel(channel)
     }

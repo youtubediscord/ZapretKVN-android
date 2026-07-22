@@ -74,6 +74,21 @@ internal object GateTrafficClient {
         GateTrafficResult(true, resolvedAddress = address.hostAddress)
     }.getOrElse { GateTrafficResult(false, it.message ?: it.javaClass.simpleName) }
 
+    fun https(host: String): GateTrafficResult = runCatching {
+        val resolved = resolveWithTunDns(host)
+        val connection = URL("https://$host/").openConnection() as HttpsURLConnection
+        connection.requestMethod = "HEAD"
+        connection.connectTimeout = TIMEOUT_MILLIS
+        connection.readTimeout = TIMEOUT_MILLIS
+        val status = try {
+            connection.responseCode
+        } finally {
+            connection.disconnect()
+        }
+        check(status in 200..599) { "Unexpected HTTPS status: $status" }
+        GateTrafficResult(true, resolvedAddress = resolved.hostAddress)
+    }.getOrElse { GateTrafficResult(false, it.message ?: it.javaClass.simpleName) }
+
     /** Models an application-owned DoH resolver followed by a numeric connection. */
     fun embeddedDohConnect(host: String): GateTrafficResult = runCatching {
         val encoded = URLEncoder.encode(host, "UTF-8")

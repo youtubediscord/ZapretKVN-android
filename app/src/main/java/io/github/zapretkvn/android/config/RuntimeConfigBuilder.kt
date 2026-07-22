@@ -50,6 +50,7 @@ internal object ManagedHealthProbe {
 data class RuntimeConfigOptions(
     val dnsMode: DnsMode = DnsMode.FromJson,
     val proxyIpv4Only: Boolean = true,
+    val dnsOverride: DnsOverride = DnsOverride(),
     val bootstrapHost: BootstrapHostOverlay? = null,
     val vpnHiding: VpnHidingOptions = VpnHidingOptions(),
     val updaterPackageName: String? = null,
@@ -188,6 +189,7 @@ object RuntimeConfigBuilder {
             root = updaterRoot,
             mode = options.dnsMode,
             proxyIpv4Only = options.proxyIpv4Only,
+            dnsOverride = options.dnsOverride,
             selectedProxyTag = selectedProxyTag,
             bootstrapHost = options.bootstrapHost,
         )
@@ -247,6 +249,7 @@ object RuntimeConfigBuilder {
         root: JsonObject,
         mode: DnsMode,
         proxyIpv4Only: Boolean,
+        dnsOverride: DnsOverride,
         selectedProxyTag: String?,
         bootstrapHost: BootstrapHostOverlay?,
     ): RuntimeConfigResult {
@@ -259,11 +262,20 @@ object RuntimeConfigBuilder {
             .filterNot { (it as? JsonObject)?.string("tag") in GENERATED_DNS_SERVER_TAGS }
 
         if (mode in MANAGED_DNS_MODES) {
+            val normalizedOverride = if (dnsOverride.enabled) {
+                DnsOverride.normalizedOrNull(
+                    dnsOverride.hostname,
+                    dnsOverride.ipv4Address,
+                ) ?: return invalid("DNS-переопределение содержит неверный домен или IPv4-адрес.")
+            } else {
+                null
+            }
             servers = servers + androidDnsServer()
             if (mode != DnsMode.Android) {
                 val proxy = checkNotNull(selectedProxyTag)
                 servers = servers + secureDnsServers(proxy)
             }
+            normalizedOverride?.let { servers = servers + dnsOverrideServer(it) }
             dns["strategy"] = JsonPrimitive("prefer_ipv4")
             dns["cache_capacity"] = JsonPrimitive(4096)
             dns["reverse_mapping"] = JsonPrimitive(true)
@@ -288,7 +300,8 @@ object RuntimeConfigBuilder {
                 )
                 DnsMode.FromJson -> emptyList()
             }
-            dns["rules"] = JsonArray(rejectRules + generated + otherRules)
+            val overrideRules = listOfNotNull(normalizedOverride?.let(::dnsOverrideRule))
+            dns["rules"] = JsonArray(rejectRules + overrideRules + generated + otherRules)
             dns["final"] = JsonPrimitive(
                 when (mode) {
                     DnsMode.Android -> ANDROID_DNS_TAG
@@ -336,6 +349,26 @@ object RuntimeConfigBuilder {
     private fun androidDnsServer(): JsonObject = buildJsonObject {
         put("type", "local")
         put("tag", ANDROID_DNS_TAG)
+    }
+
+    private fun dnsOverrideServer(override: DnsOverride): JsonObject = buildJsonObject {
+        put("type", "hosts")
+        put("tag", DNS_OVERRIDE_TAG)
+        put(
+            "predefined",
+            buildJsonObject {
+                put(
+                    override.hostname,
+                    JsonArray(listOf(JsonPrimitive(override.ipv4Address))),
+                )
+            },
+        )
+    }
+
+    private fun dnsOverrideRule(override: DnsOverride): JsonObject = buildJsonObject {
+        put("domain", JsonArray(listOf(JsonPrimitive(override.hostname))))
+        put("action", "route")
+        put("server", DNS_OVERRIDE_TAG)
     }
 
     private fun secureDnsServers(proxyTag: String): List<JsonObject> = listOf(
@@ -701,6 +734,7 @@ object RuntimeConfigBuilder {
     private const val DOH_3_TAG = "zapret-doh-3"
     private const val SECURE_DNS_TAG = "zapret-secure-dns"
     private const val BOOTSTRAP_DNS_TAG = "zapret-bootstrap-lkg"
+    private const val DNS_OVERRIDE_TAG = "zapret-dns-override"
     private const val IPV4_ONLY_STRATEGY = "ipv4_only"
     private val GENERATED_DNS_SERVER_TAGS = setOf(
         ANDROID_DNS_TAG,
@@ -708,6 +742,7 @@ object RuntimeConfigBuilder {
         DOH_2_TAG,
         SECURE_DNS_TAG,
         BOOTSTRAP_DNS_TAG,
+        DNS_OVERRIDE_TAG,
     )
     private val DOMAIN_MATCH_FIELDS = setOf(
         "domain",

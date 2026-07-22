@@ -9,6 +9,7 @@ import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import io.github.zapretkvn.android.config.DnsMode
+import io.github.zapretkvn.android.config.DnsOverride
 import io.github.zapretkvn.android.hardening.TunMtuMode
 import io.github.zapretkvn.android.hardening.VpnHidingOptions
 import io.github.zapretkvn.android.updates.UpdateChannel
@@ -29,6 +30,7 @@ data class UiSettings(
     val rawEditorLineWrap: Boolean = false,
     val dnsMode: DnsMode = DnsMode.FromJson,
     val proxyIpv4Only: Boolean = true,
+    val dnsOverride: DnsOverride = DnsOverride(),
     val updateChannel: UpdateChannel = UpdateChannel.Stable,
     val vpnHiding: VpnHidingOptions = VpnHidingOptions(),
 )
@@ -55,6 +57,11 @@ class UiSettingsStore(context: Context) {
                     ?.let { stored -> DnsMode.entries.firstOrNull { it.name == stored } }
                     ?: DnsMode.FromJson,
                 proxyIpv4Only = preferences[PROXY_IPV4_ONLY] ?: true,
+                dnsOverride = DnsOverride(
+                    enabled = preferences[DNS_OVERRIDE_ENABLED] ?: true,
+                    hostname = preferences[DNS_OVERRIDE_HOSTNAME] ?: DnsOverride.DEFAULT_HOSTNAME,
+                    ipv4Address = preferences[DNS_OVERRIDE_IPV4] ?: DnsOverride.DEFAULT_IPV4_ADDRESS,
+                ),
                 updateChannel = preferences[UPDATE_CHANNEL]
                     ?.let { stored -> UpdateChannel.entries.firstOrNull { it.name == stored } }
                     ?: UpdateChannel.Stable,
@@ -91,6 +98,20 @@ class UiSettingsStore(context: Context) {
         dataStore.edit { it[PROXY_IPV4_ONLY] = enabled }
     }
 
+    suspend fun setDnsOverrideEnabled(enabled: Boolean) {
+        dataStore.edit { it[DNS_OVERRIDE_ENABLED] = enabled }
+    }
+
+    suspend fun setDnsOverride(hostname: String, ipv4Address: String) {
+        val normalized = requireNotNull(DnsOverride.normalizedOrNull(hostname, ipv4Address)) {
+            "Invalid DNS override"
+        }
+        dataStore.edit {
+            it[DNS_OVERRIDE_HOSTNAME] = normalized.hostname
+            it[DNS_OVERRIDE_IPV4] = normalized.ipv4Address
+        }
+    }
+
     suspend fun setUpdateChannel(channel: UpdateChannel) {
         dataStore.edit { it[UPDATE_CHANNEL] = channel.name }
     }
@@ -113,6 +134,9 @@ class UiSettingsStore(context: Context) {
         val RAW_EDITOR_LINE_WRAP = booleanPreferencesKey("raw_editor_line_wrap")
         val DNS_MODE = stringPreferencesKey("dns_mode")
         val PROXY_IPV4_ONLY = booleanPreferencesKey("proxy_ipv4_only")
+        val DNS_OVERRIDE_ENABLED = booleanPreferencesKey("dns_override_enabled")
+        val DNS_OVERRIDE_HOSTNAME = stringPreferencesKey("dns_override_hostname")
+        val DNS_OVERRIDE_IPV4 = stringPreferencesKey("dns_override_ipv4")
         val UPDATE_CHANNEL = stringPreferencesKey("update_channel")
         val VPN_HIDING_BLOCK_LOCAL_ENDPOINTS =
             booleanPreferencesKey("vpn_hiding_block_local_endpoints")
