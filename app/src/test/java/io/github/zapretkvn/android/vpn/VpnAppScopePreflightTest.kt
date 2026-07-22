@@ -168,6 +168,17 @@ class VpnAppScopePreflightTest {
     }
 
     @Test
+    fun `pyaterochka web handler is not suggested as a browser`() {
+        assertEquals(
+            null,
+            suggestedAppLabel(
+                packageName = "ru.pyaterochka.app.browser",
+                browserPackages = setOf("ru.pyaterochka.app.browser"),
+            ),
+        )
+    }
+
+    @Test
     fun `any tg scheme handler is suggested without a hardcoded package`() {
         assertEquals(
             "Telegram-клиент",

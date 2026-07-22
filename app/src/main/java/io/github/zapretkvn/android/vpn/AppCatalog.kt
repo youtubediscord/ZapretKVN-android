@@ -184,14 +184,19 @@ object PopularAppSuggestions {
     fun labelFor(packageName: String): String? = labelsByPackage[packageName]
 }
 
+private val nonBrowserPackages = setOf(
+    // The Pyaterochka app exposes a generic web handler but is not a browser.
+    "ru.pyaterochka.app.browser",
+)
+
 internal fun suggestedAppLabel(
     packageName: String,
     browserPackages: Set<String>,
     telegramPackages: Set<String> = emptySet(),
     youtubePackages: Set<String> = emptySet(),
-): String? = PopularAppSuggestions.labelFor(packageName) ?: when (packageName) {
-    in browserPackages -> "Браузер"
-    in telegramPackages -> "Telegram-клиент"
-    in youtubePackages -> "YouTube-клиент"
+): String? = PopularAppSuggestions.labelFor(packageName) ?: when {
+    packageName in browserPackages && packageName !in nonBrowserPackages -> "Браузер"
+    packageName in telegramPackages -> "Telegram-клиент"
+    packageName in youtubePackages -> "YouTube-клиент"
     else -> null
 }
