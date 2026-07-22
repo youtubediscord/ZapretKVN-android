@@ -6,6 +6,7 @@ import android.content.ClipboardManager
 import android.os.Build
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
@@ -172,6 +173,7 @@ class Gate6EndToEndInstrumentedTest {
         composeRule.onNodeWithText("Подключено: Gate SS").assertExists()
         composeRule.onNodeWithText("Среда").assertExists()
         composeRule.onNodeWithTag("export-diagnostics").assertExists()
+        composeRule.onNodeWithText("Экспортировать диагностику").assertIsDisplayed()
         composeRule.waitUntil(10_000) {
             container.vpnController.diagnosticsVisible.value &&
                 VpnRuntimeMetrics.snapshot().activeLogClients == 1 &&

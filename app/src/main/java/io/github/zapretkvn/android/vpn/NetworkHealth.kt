@@ -7,14 +7,19 @@ import io.github.zapretkvn.android.config.DnsMode
 import io.github.zapretkvn.android.config.ProxyBootstrapTarget
 import java.io.DataInputStream
 import java.io.DataOutputStream
+import java.io.IOException
+import java.net.ConnectException
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Socket
+import java.net.SocketTimeoutException
+import java.net.UnknownHostException
 import java.net.URL
 import java.util.concurrent.ThreadLocalRandom
 import javax.net.ssl.HttpsURLConnection
+import javax.net.ssl.SSLException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -240,13 +245,33 @@ class VpnHealthPipeline(
             connection.setRequestProperty("Connection", "close")
             connection.requestMethod = "GET"
             val status = connection.responseCode
-            if (status != 204) error("HTTPS-проверка через VPN вернула HTTP $status вместо 204.")
+            if (status != 204) throw UnexpectedHttpsStatus(status)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (error: Throwable) {
-            throw IllegalStateException("HTTPS-проверка через VPN не прошла.", error)
+            throw IllegalStateException(
+                "HTTPS-проверка через VPN не прошла: ${httpsFailureReason(error)}.",
+                error,
+            )
         } finally {
             connection.disconnect()
         }
     }
+
+    private fun httpsFailureReason(error: Throwable): String {
+        val cause = generateSequence(error) { it.cause }.last()
+        return when (cause) {
+            is UnexpectedHttpsStatus -> "тестовый узел вернул HTTP ${cause.status} вместо 204"
+            is SocketTimeoutException -> "истёк тайм-аут ${HTTPS_TIMEOUT_MILLIS} мс"
+            is UnknownHostException -> "Android не разрешил имя тестового узла"
+            is ConnectException -> "TCP-соединение с тестовым узлом не установлено"
+            is SSLException -> "ошибка TLS (${cause.javaClass.simpleName})"
+            is IOException -> "ошибка ввода-вывода (${cause.javaClass.simpleName})"
+            else -> cause.javaClass.simpleName.ifBlank { "неизвестная сетевая ошибка" }
+        }
+    }
+
+    private class UnexpectedHttpsStatus(val status: Int) : IOException()
 
     private fun dnsQuery(hostname: String): ByteArray {
         val id = ThreadLocalRandom.current().nextInt(0x10000)

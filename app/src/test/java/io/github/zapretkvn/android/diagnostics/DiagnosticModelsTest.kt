@@ -28,6 +28,13 @@ class DiagnosticModelsTest {
             DiagnosticErrorType.SystemDns,
             DiagnosticFailureClassifier.classify("Системный DNS не ответил вовремя"),
         )
+        assertEquals(
+            DiagnosticErrorType.VpnTraffic,
+            DiagnosticFailureClassifier.classify(
+                "HTTPS-проверка через VPN не прошла: истёк тайм-аут 5000 мс.",
+            ),
+        )
+        assertEquals("VPN-200", DiagnosticErrorType.VpnTraffic.supportCode)
         assertEquals("DNS-100", DiagnosticErrorType.SystemDns.supportCode)
         assertEquals(
             DiagnosticErrorType.entries.size,
@@ -60,9 +67,9 @@ class DiagnosticModelsTest {
     }
 
     @Test
-    fun `startup log ring and recent attempt history stay independently bounded`() {
+    fun `startup log window preserves first and last evidence while history stays bounded`() {
         val startup = (0 until 60).fold(emptyList<DiagnosticLogLine>()) { lines, index ->
-            lines.appendBounded(
+            lines.appendStartupWindow(
                 DiagnosticLogLine(5, "startup-$index", index.toLong()),
                 MAX_DIAGNOSTIC_STARTUP_LOG_LINES,
             )
@@ -83,7 +90,10 @@ class DiagnosticModelsTest {
         )
 
         assertEquals(MAX_DIAGNOSTIC_STARTUP_LOG_LINES, startup.size)
-        assertEquals("startup-20", startup.first().message)
+        assertEquals("startup-0", startup.first().message)
+        assertEquals("startup-19", startup[19].message)
+        assertEquals("startup-40", startup[20].message)
+        assertEquals("startup-59", startup.last().message)
         assertEquals(listOf(2L, 3L, 4L), state.recentConnectionAttempts.map { it.generation })
     }
 

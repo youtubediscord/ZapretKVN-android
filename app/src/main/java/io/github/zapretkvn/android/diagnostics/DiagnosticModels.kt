@@ -11,6 +11,7 @@ enum class DiagnosticErrorType(
     PrivateDns("private_dns", "Private DNS", "DNS-110"),
     VpnServer("vpn_server", "VPN-сервер", "SRV-100"),
     VpnDns("vpn_dns", "DNS через VPN", "DNS-200"),
+    VpnTraffic("vpn_traffic", "Трафик через VPN", "VPN-200"),
     CaptivePortal("captive_portal", "Авторизация Wi-Fi", "NET-110"),
     Core("core", "Ядро sing-box", "CORE-100"),
     AndroidNetwork("android_network", "Сеть Android", "NET-100"),
@@ -25,6 +26,9 @@ object DiagnosticFailureClassifier {
             "private dns" in value -> DiagnosticErrorType.PrivateDns
             "авторизац" in value || "captive" in value -> DiagnosticErrorType.CaptivePortal
             "разрешение" in value && "vpn" in value -> DiagnosticErrorType.Permission
+            "https-провер" in value ||
+                "https probe" in value ||
+                "health-check" in value -> DiagnosticErrorType.VpnTraffic
             ("dns" in value && "vpn" in value) ||
                 "внутренний dns" in value ||
                 "внутреннего dns" in value ||
@@ -161,6 +165,18 @@ internal fun List<DiagnosticLogLine>.appendBounded(
     line: DiagnosticLogLine,
     limit: Int = MAX_DIAGNOSTIC_LOG_LINES,
 ): List<DiagnosticLogLine> = (this + line).takeLast(limit)
+
+/** Keeps startup evidence from both sides of a noisy bounded log stream. */
+internal fun List<DiagnosticLogLine>.appendStartupWindow(
+    line: DiagnosticLogLine,
+    limit: Int = MAX_DIAGNOSTIC_STARTUP_LOG_LINES,
+): List<DiagnosticLogLine> {
+    if (limit <= 0) return emptyList()
+    if (size < limit) return this + line
+    val headSize = limit / 2
+    val tailSize = limit - headSize
+    return take(headSize) + (drop(headSize) + line).takeLast(tailSize)
+}
 
 const val MAX_DIAGNOSTIC_LOG_LINES = 80
 const val MAX_DIAGNOSTIC_STARTUP_LOG_LINES = 40

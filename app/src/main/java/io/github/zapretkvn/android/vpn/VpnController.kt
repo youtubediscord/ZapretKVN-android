@@ -21,6 +21,7 @@ import io.github.zapretkvn.android.diagnostics.MAX_DIAGNOSTIC_STARTUP_LOG_LINES
 import io.github.zapretkvn.android.diagnostics.MAX_DIAGNOSTIC_STAGES
 import io.github.zapretkvn.android.diagnostics.SecretRedactor
 import io.github.zapretkvn.android.diagnostics.appendBounded
+import io.github.zapretkvn.android.diagnostics.appendStartupWindow
 import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -362,7 +363,7 @@ class VpnController(
             val attempt = current.connectionAttempt
             val startupAttempt = if (attempt?.outcome == DiagnosticAttemptOutcome.Running) {
                 attempt.copy(
-                    startupCoreLogs = attempt.startupCoreLogs.appendBounded(
+                    startupCoreLogs = attempt.startupCoreLogs.appendStartupWindow(
                         line,
                         MAX_DIAGNOSTIC_STARTUP_LOG_LINES,
                     ),

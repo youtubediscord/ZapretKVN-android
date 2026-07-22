@@ -565,6 +565,48 @@ private fun DiagnosticsSettings(
                 Text(vpnState.diagnosticLabel(), fontWeight = FontWeight.SemiBold)
             }
         }
+        OutlinedButton(
+            enabled = !exporting,
+            onClick = {
+                scope.launch {
+                    exporting = true
+                    exportError = null
+                    try {
+                        val shareIntent = onCreateDiagnosticShare()
+                        context.startActivity(
+                            Intent.createChooser(shareIntent, "Передать диагностику"),
+                        )
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (_: ActivityNotFoundException) {
+                        exportError = "Не найдено приложение для передачи файла."
+                    } catch (_: SecurityException) {
+                        exportError = "Android запретил передачу файла."
+                    } catch (_: Throwable) {
+                        exportError = "Не удалось создать диагностический файл."
+                    } finally {
+                        exporting = false
+                    }
+                }
+            },
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("export-diagnostics"),
+        ) {
+            if (exporting) {
+                CircularProgressIndicator(
+                    modifier = Modifier.padding(end = 8.dp),
+                    strokeWidth = 2.dp,
+                )
+            }
+            Text("Экспортировать диагностику")
+        }
+        exportError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        Text(
+            "Создаёт временный redacted diagnostic JSON и открывает системное окно отправки.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
         ElevatedCard(modifier = Modifier.fillMaxWidth()) {
             Column(
                 modifier = Modifier.padding(18.dp),
@@ -845,44 +887,9 @@ private fun DiagnosticsSettings(
                 }
             }
         }
-        OutlinedButton(
-            enabled = !exporting,
-            onClick = {
-                scope.launch {
-                    exporting = true
-                    exportError = null
-                    try {
-                        val shareIntent = onCreateDiagnosticShare()
-                        context.startActivity(
-                            Intent.createChooser(shareIntent, "Передать диагностику"),
-                        )
-                    } catch (cancelled: CancellationException) {
-                        throw cancelled
-                    } catch (_: ActivityNotFoundException) {
-                        exportError = "Не найдено приложение для передачи файла."
-                    } catch (_: SecurityException) {
-                        exportError = "Android запретил передачу файла."
-                    } catch (_: Throwable) {
-                        exportError = "Не удалось создать диагностический файл."
-                    } finally {
-                        exporting = false
-                    }
-                }
-            },
-            modifier = Modifier.testTag("export-diagnostics"),
-        ) {
-            if (exporting) {
-                CircularProgressIndicator(
-                    modifier = Modifier.padding(end = 8.dp),
-                    strokeWidth = 2.dp,
-                )
-            }
-            Text("Создать и передать diagnostic JSON")
-        }
-        exportError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         OutlinedButton(onClick = onClearDnsCache) { Text("Очистить DNS-кэш и перезапустить core") }
         Text(
-            "Файл создаётся только этой кнопкой во временном cache. Runtime-лог на диск не пишется; временный export удаляется при следующем запуске.",
+            "Runtime-лог на диск не пишется; временный export удаляется при следующем запуске.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

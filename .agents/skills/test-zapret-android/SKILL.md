@@ -71,7 +71,7 @@ Do not force-stop or relaunch the app between the failure and diagnostic export:
 
 The normal logcat does not contain the bounded libbox `CommandLog`. Obtain it from the app's redacted diagnostic JSON.
 
-After reproducing, open `Настройки → Диагностика` and press the export button once. The appearance of the Sharesheet is enough to create the cache file. Without pressing the button, no report file exists.
+After reproducing, open `Настройки → Диагностика` and press `Экспортировать диагностику` near the top once. The appearance of the Sharesheet is enough to create the cache file. Without pressing the button, no report file exists. In Test 9 and older, scroll to the very bottom and press the former `Создать и передать diagnostic JSON` button.
 
 Pull it from an installed debug build in Windows CMD:
 
@@ -89,6 +89,12 @@ adb exec-out run-as io.github.zapretkvn.android.debug \
 ```
 
 If `run-as` reports that the package is not debuggable, verify the installed package. For a real release build, use the Sharesheet instead. The temporary export is deleted at the next application startup, so copy it before restarting.
+
+Before treating an attachment as app evidence, verify that it is JSON and contains the Zapret schema. A Telegram MTP/MTProxy text log renamed to `.json` is not an app diagnostic:
+
+```bash
+jq -e '.schema_version >= 2 and (.app | type == "object")' zapret-kvn-diagnostic.json
+```
 
 ## Capture Android network state
 
