@@ -6,13 +6,28 @@ import org.junit.Test
 
 class UpdateJsonTest {
     @Test
-    fun `matrix metadata selects device ABI and matching checksum strictly`() {
-        val metadata = UpdateJson.metadata(METADATA, listOf("armeabi-v7a", "arm64-v8a"))
+    fun `partial matrix metadata selects device ABI and matching checksum strictly`() {
+        val metadata = UpdateJson.metadata(PARTIAL_METADATA, listOf("armeabi-v7a", "arm64-v8a"))
 
         assertEquals("1.2.3", metadata.versionName)
         assertEquals(102_003_099, metadata.versionCode)
         assertEquals(listOf("armeabi-v7a"), metadata.abi)
         assertEquals(SHA, UpdateJson.checksum("$SHA  Zapret-KVN-v1.2.3-armeabi-v7a.apk\n", metadata.apkFile))
+    }
+
+    @Test
+    fun `matrix metadata rejects duplicate ABI and missing device ABI`() {
+        val duplicate = PARTIAL_METADATA.replace(
+            """{"abi":"armeabi-v7a"""",
+            """{"abi":"armeabi-v7a","apk_file":"duplicate.apk","apk_sha256":"$SHA","apk_size":1234},{"abi":"armeabi-v7a"""",
+        )
+
+        assertThrows(UpdateException::class.java) {
+            UpdateJson.metadata(duplicate, listOf("armeabi-v7a"))
+        }
+        assertThrows(UpdateException::class.java) {
+            UpdateJson.metadata(PARTIAL_METADATA, listOf("x86_64"))
+        }
     }
 
     @Test
@@ -61,6 +76,19 @@ class UpdateJsonTest {
                 {"abi":"arm64-v8a","apk_file":"Zapret-KVN-v1.2.3-arm64-v8a.apk","apk_sha256":"$SHA","apk_size":1234},
                 {"abi":"armeabi-v7a","apk_file":"Zapret-KVN-v1.2.3-armeabi-v7a.apk","apk_sha256":"$SHA","apk_size":1234},
                 {"abi":"x86_64","apk_file":"Zapret-KVN-v1.2.3-x86_64.apk","apk_sha256":"$SHA","apk_size":1234}
+              ]
+            }
+        """
+        const val PARTIAL_METADATA = """
+            {
+              "schema":2,
+              "version_name":"1.2.3",
+              "version_code":102003099,
+              "application_id":"io.github.zapretkvn.android",
+              "core_tag":"v1.13.14-extended-2.5.2",
+              "core_commit":"ff11f007ec798136a5de258f947a4f34011a37ea",
+              "artifacts":[
+                {"abi":"armeabi-v7a","apk_file":"Zapret-KVN-v1.2.3-armeabi-v7a.apk","apk_sha256":"$SHA","apk_size":1234}
               ]
             }
         """

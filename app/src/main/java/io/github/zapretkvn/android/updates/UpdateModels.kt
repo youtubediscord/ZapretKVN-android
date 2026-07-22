@@ -141,8 +141,8 @@ object UpdateJson {
                 )
             }
             ?: throw UpdateException("Список APK отсутствует в release metadata.")
-        if (artifacts.map(Artifact::abi).toSet() != KNOWN_ABIS || artifacts.size != KNOWN_ABIS.size) {
-            throw UpdateException("Release содержит неполный или повторяющийся набор ABI.")
+        if (artifacts.map(Artifact::abi).toSet().size != artifacts.size) {
+            throw UpdateException("Release содержит повторяющийся ABI.")
         }
         return supportedAbis.firstNotNullOfOrNull { supported ->
             artifacts.singleOrNull { it.abi == supported }
