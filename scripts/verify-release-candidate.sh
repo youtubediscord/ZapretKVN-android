@@ -160,8 +160,9 @@ if [[ "$ABI" == arm64-v8a ]]; then
     unzip -p "$SYMBOL_ZIP" arm64-v8a/libbox.so > "$TEMP_DIR/libbox-symbols.so"
     readelf -S "$TEMP_DIR/libbox-symbols.so" | grep -Fq '.symtab'
     readelf -S "$TEMP_DIR/libbox-symbols.so" | grep -Fq '.debug_info'
-    jq -e --arg commit "$CORE_COMMIT" '
-      .core_commit == $commit and .abi == "arm64-v8a" and .loadable_sections_exact == true
+    jq -e --arg commit "$CORE_COMMIT" --arg patch_sha256 "$CORE_PATCH_SHA256" '
+      .core_commit == $commit and .core_patch_sha256 == $patch_sha256 and
+      .abi == "arm64-v8a" and .loadable_sections_exact == true
     ' "$SYMBOL_METADATA" >/dev/null
 fi
 
@@ -214,8 +215,9 @@ jq -n \
     --argjson signed "$SIGNED" \
     --arg signer_sha256 "$SIGNER_SHA256" \
     --arg core_commit "$CORE_COMMIT" \
+    --arg core_patch_sha256 "$CORE_PATCH_SHA256" \
     --arg abi "$ABI" \
-    '{apk:$apk,abi:$abi,apk_sha256:$apk_sha256,apk_size:$apk_size,r8_mapping_sha256:$mapping_sha256,r8_mapping_size:$mapping_size,native_symbols_sha256:$symbols_sha256,native_symbols_size:$symbols_size,signed:$signed,signer_sha256:$signer_sha256,core_commit:$core_commit,debuggable:false,cleartext:false,manifest_allowlist:true,secret_canaries_absent:true}' \
+    '{apk:$apk,abi:$abi,apk_sha256:$apk_sha256,apk_size:$apk_size,r8_mapping_sha256:$mapping_sha256,r8_mapping_size:$mapping_size,native_symbols_sha256:$symbols_sha256,native_symbols_size:$symbols_size,signed:$signed,signer_sha256:$signer_sha256,core_commit:$core_commit,core_patch_sha256:$core_patch_sha256,debuggable:false,cleartext:false,manifest_allowlist:true,secret_canaries_absent:true}' \
     > "$REPORT_DIR/security-report-$ABI.json"
 
 echo "Release candidate security audit passed: $REPORT_DIR/security-report-$ABI.json"

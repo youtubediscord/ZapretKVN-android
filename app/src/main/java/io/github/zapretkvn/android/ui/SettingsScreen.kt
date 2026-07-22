@@ -684,7 +684,8 @@ private fun DiagnosticsSettings(
                             attempt.stages.forEach { stage ->
                                 Text(
                                     "${stage.status.symbol()} ${stage.label} — " +
-                                        (stage.durationMillis?.let(::formatDiagnosticDuration) ?: "выполняется"),
+                                        (stage.durationMillis?.let(::formatDiagnosticDuration) ?: "выполняется") +
+                                        (stage.detail?.let { " · $it" } ?: ""),
                                     style = MaterialTheme.typography.bodySmall,
                                     color = if (stage.status == DiagnosticStageStatus.Failed) {
                                         MaterialTheme.colorScheme.error
@@ -756,10 +757,39 @@ private fun DiagnosticsSettings(
                     }
                 }
                 Text(
-                    "Хранится только один redacted crash без сетевого runtime-лога. Native crash и ANR этим обработчиком не перехватываются.",
+                    "Хранится только один redacted Kotlin/Java crash без сетевого runtime-лога. " +
+                        "На API 30+ Android отдельно сообщает тип последнего native crash/ANR без тяжёлого trace.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                diagnostics.previousProcessExit?.let { exit ->
+                    HorizontalDivider()
+                    Text("Предыдущее завершение процесса", fontWeight = FontWeight.SemiBold)
+                    Text(
+                        "${exit.reason} · status ${exit.status}",
+                        color = if (exit.reason == "native_crash" || exit.reason == "anr") {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            MaterialTheme.colorScheme.onSurface
+                        },
+                    )
+                    Text(
+                        "${formatDiagnosticTimestamp(exit.occurredAtEpochMillis)} · " +
+                            "PSS ${exit.pssKilobytes} KiB · RSS ${exit.rssKilobytes} KiB",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    exit.description?.let {
+                        Text(it, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+                if (Build.VERSION.SDK_INT < 30) {
+                    Text(
+                        "История native crash/ANR через Android доступна начиная с API 30.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
         }
         ElevatedCard(modifier = Modifier.fillMaxWidth()) {
@@ -770,6 +800,10 @@ private fun DiagnosticsSettings(
                 Text("Среда", style = MaterialTheme.typography.titleMedium)
                 Text("Zapret KVN ${BuildConfig.VERSION_NAME}")
                 Text("Core ${BuildConfig.CORE_TAG} · ${BuildConfig.CORE_COMMIT.take(12)}")
+                Text(
+                    "Android patch ${BuildConfig.CORE_PATCH_SHA256.take(12)}",
+                    style = MaterialTheme.typography.bodySmall,
+                )
                 Text("Android ${Build.VERSION.RELEASE} · API ${Build.VERSION.SDK_INT}")
                 val vpnPolicy = diagnostics.vpnPolicy
                 when {
@@ -833,6 +867,13 @@ private fun DiagnosticsSettings(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                Text(
+                    "Core: получено ${diagnostics.coreLogStats.receivedLines}, " +
+                        "схлопнуто ${diagnostics.coreLogStats.coalescedLines}, " +
+                        "отброшено ${diagnostics.coreLogStats.droppedLines}.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
                 OutlinedButton(
                     onClick = { logsExpanded = !logsExpanded },
                     modifier = Modifier.testTag("diagnostic-logs-toggle"),
@@ -852,7 +893,8 @@ private fun DiagnosticsSettings(
                         ) {
                             diagnostics.logs.forEach { line ->
                                 Text(
-                                    "${line.levelName}: ${line.message}",
+                                    "${line.levelName}/${line.category.code}: ${line.message}" +
+                                        if (line.repeatCount > 1) " ×${line.repeatCount}" else "",
                                     style = MaterialTheme.typography.bodySmall,
                                     fontFamily = FontFamily.Monospace,
                                 )
@@ -1139,6 +1181,7 @@ private fun DiagnosticAttemptOutcome.diagnosticLabel(totalDurationMillis: Long?)
 private fun DiagnosticStageStatus.symbol(): String = when (this) {
     DiagnosticStageStatus.Running -> "…"
     DiagnosticStageStatus.Success -> "✓"
+    DiagnosticStageStatus.Recovered -> "↻"
     DiagnosticStageStatus.Failed -> "×"
     DiagnosticStageStatus.Cancelled -> "—"
 }

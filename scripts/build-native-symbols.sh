@@ -4,6 +4,8 @@ set -euo pipefail
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck disable=SC1090,SC1091
 source "$PROJECT_ROOT/core.properties"
+# shellcheck disable=SC1091
+source "$PROJECT_ROOT/scripts/core-patchset.sh"
 
 if [[ -z "${ANDROID_HOME:-}" && -f "$PROJECT_ROOT/local.properties" ]]; then
     ANDROID_HOME="$(sed -n 's/^sdk\.dir=//p' "$PROJECT_ROOT/local.properties" | tail -n 1)"
@@ -20,7 +22,12 @@ SYMBOL_ZIP="$OUTPUT_DIR/native-debug-symbols.zip"
 GOPATH_DIR="$PROJECT_ROOT/core-build/gopath"
 LLVM_STRIP="$ANDROID_HOME/ndk/$ANDROID_NDK_VERSION/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip"
 
+CORE_PATCH_APPLIED=false
 cleanup() {
+    if [[ "$CORE_PATCH_APPLIED" == true ]]; then
+        reverse_core_patchset "$PROJECT_ROOT" "$SOURCE_DIR"
+        CORE_PATCH_APPLIED=false
+    fi
     rm -rf -- "$TEMP_DIR"
 }
 trap cleanup EXIT
@@ -31,6 +38,8 @@ done
 [[ -x "$LLVM_STRIP" && -f "$PRODUCTION_AAR" && -d "$SOURCE_DIR/.git" ]]
 [[ "$(git -C "$SOURCE_DIR" rev-parse HEAD)" == "$CORE_COMMIT" ]]
 [[ -z "$(git -C "$SOURCE_DIR" status --porcelain)" ]]
+apply_core_patchset "$PROJECT_ROOT" "$SOURCE_DIR"
+CORE_PATCH_APPLIED=true
 
 export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/$ANDROID_NDK_VERSION"
 export GOPATH="$GOPATH_DIR"
@@ -126,11 +135,12 @@ SYMBOL_SHA256="$(sha256sum "$SYMBOL_DIR/arm64-v8a/libbox.so" | awk '{print $1}')
 ZIP_SHA256="$(sha256sum "$SYMBOL_ZIP" | awk '{print $1}')"
 jq -n \
     --arg core_commit "$CORE_COMMIT" \
+    --arg core_patch_sha256 "$CORE_PATCH_SHA256" \
     --arg abi "arm64-v8a" \
     --arg production_sha256 "$PRODUCTION_SHA256" \
     --arg symbol_sha256 "$SYMBOL_SHA256" \
     --arg archive_sha256 "$ZIP_SHA256" \
-    '{core_commit:$core_commit,abi:$abi,production_libbox_sha256:$production_sha256,unstripped_libbox_sha256:$symbol_sha256,archive_sha256:$archive_sha256,loadable_sections_exact:true}' \
+    '{core_commit:$core_commit,core_patch_sha256:$core_patch_sha256,abi:$abi,production_libbox_sha256:$production_sha256,unstripped_libbox_sha256:$symbol_sha256,archive_sha256:$archive_sha256,loadable_sections_exact:true}' \
     > "$OUTPUT_DIR/native-symbols-metadata.json"
 (
     cd "$OUTPUT_DIR"

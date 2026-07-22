@@ -34,8 +34,16 @@ enum class VpnHealthStage(
     val diagnosticLabel: String,
 ) {
     AwaitVpnNetwork("vpn_network", "Ожидание VPN-сети Android"),
-    DnsProbe("dns_probe", "DNS-проверка через TUN"),
+    DnsUdpProbe("dns_udp", "DNS через TUN (UDP)"),
+    DnsTcpProbe("dns_tcp", "DNS через TUN (TCP fallback)"),
+    DnsAndroidProbe("dns_android", "DNS через Android VPN network"),
     HttpsProbe("https_probe", "HTTPS-проверка через VPN"),
+}
+
+enum class VpnHealthStageOutcome {
+    Success,
+    Recovered,
+    Failed,
 }
 
 data class PreparedBootstrap(
@@ -147,54 +155,174 @@ class VpnHealthPipeline(
     suspend fun verify(
         mode: DnsMode,
         internalDnsServer: String,
-        onStage: (VpnHealthStage) -> Unit = {},
+        onStageStarted: (VpnHealthStage) -> Unit = {},
+        onStageFinished: (VpnHealthStage, VpnHealthStageOutcome, String?) -> Unit = { _, _, _ -> },
     ): HealthCheckResult {
-        onStage(VpnHealthStage.AwaitVpnNetwork)
+        onStageStarted(VpnHealthStage.AwaitVpnNetwork)
         if (VpnTestHooks.consumeHealthFailureOverride()) {
+            onStageFinished(
+                VpnHealthStage.AwaitVpnNetwork,
+                VpnHealthStageOutcome.Failed,
+                "test_override",
+            )
             error("Тестовая ошибка health-check DNS/HTTPS.")
         }
         if (VpnTestHooks.consumeHealthSuccessOverride()) {
+            onStageFinished(
+                VpnHealthStage.AwaitVpnNetwork,
+                VpnHealthStageOutcome.Success,
+                "test_override",
+            )
             return HealthCheckResult(externalIpProbeAllowed = false)
         }
         return withTimeout(HEALTH_TIMEOUT_MILLIS) {
-            val vpnNetwork = vpnNetworks.awaitActive()
-            vpnNetworks.requireActive(vpnNetwork)
-            onStage(VpnHealthStage.DnsProbe)
+            val vpnNetwork = try {
+                vpnNetworks.awaitActive().also(vpnNetworks::requireActive)
+            } catch (error: Throwable) {
+                onStageFinished(
+                    VpnHealthStage.AwaitVpnNetwork,
+                    VpnHealthStageOutcome.Failed,
+                    rootCauseName(error),
+                )
+                throw error
+            }
+            onStageFinished(
+                VpnHealthStage.AwaitVpnNetwork,
+                VpnHealthStageOutcome.Success,
+                "active=true",
+            )
             if (VpnTestHooks.consumeDnsProbeFailure()) {
+                val failedStage = if (mode == DnsMode.Automatic || mode == DnsMode.Secure) {
+                    VpnHealthStage.DnsUdpProbe
+                } else {
+                    VpnHealthStage.DnsAndroidProbe
+                }
+                onStageStarted(failedStage)
+                onStageFinished(failedStage, VpnHealthStageOutcome.Failed, "test_override")
                 error("DNS через VPN не отвечает: тестовый внутренний DNS недоступен.")
             }
             if (mode == DnsMode.Automatic || mode == DnsMode.Secure) {
-                rawDnsProbe(internalDnsServer, HEALTH_HOST)
+                rawDnsProbe(internalDnsServer, HEALTH_HOST, onStageStarted, onStageFinished)
             } else {
-                runCatching { resolver.resolve(vpnNetwork, HEALTH_HOST) }
-                    .getOrElse {
-                        throw IllegalStateException(
-                            "DNS через VPN не отвечает: ${it.message ?: it.javaClass.simpleName}.",
-                            it,
-                        )
+                onStageStarted(VpnHealthStage.DnsAndroidProbe)
+                try {
+                    val addresses = resolver.resolve(vpnNetwork, HEALTH_HOST)
+                    onStageFinished(
+                        VpnHealthStage.DnsAndroidProbe,
+                        VpnHealthStageOutcome.Success,
+                        "answers=${addresses.size}",
+                    )
+                } catch (error: Throwable) {
+                    onStageFinished(
+                        VpnHealthStage.DnsAndroidProbe,
+                        VpnHealthStageOutcome.Failed,
+                        rootCauseName(error),
+                    )
+                    throw IllegalStateException(
+                        "DNS через VPN не отвечает: ${error.message ?: error.javaClass.simpleName}.",
+                        error,
+                    )
                 }
             }
-            onStage(VpnHealthStage.HttpsProbe)
+            onStageStarted(VpnHealthStage.HttpsProbe)
             if (VpnTestHooks.consumeHttpsProbeFailure()) {
+                onStageFinished(
+                    VpnHealthStage.HttpsProbe,
+                    VpnHealthStageOutcome.Failed,
+                    "test_override",
+                )
                 error("HTTPS-проверка через VPN не прошла: тестовый endpoint недоступен.")
             }
-            httpsProbe(vpnNetwork)
+            try {
+                val status = httpsProbe(vpnNetwork)
+                onStageFinished(
+                    VpnHealthStage.HttpsProbe,
+                    VpnHealthStageOutcome.Success,
+                    "status=$status",
+                )
+            } catch (error: Throwable) {
+                onStageFinished(
+                    VpnHealthStage.HttpsProbe,
+                    VpnHealthStageOutcome.Failed,
+                    rootCauseName(error),
+                )
+                throw error
+            }
             HealthCheckResult(externalIpProbeAllowed = true)
         }
     }
 
-    private suspend fun rawDnsProbe(dnsServer: String, hostname: String) =
+    private suspend fun rawDnsProbe(
+        dnsServer: String,
+        hostname: String,
+        onStageStarted: (VpnHealthStage) -> Unit,
+        onStageFinished: (VpnHealthStage, VpnHealthStageOutcome, String?) -> Unit,
+    ) =
         withContext(Dispatchers.IO) {
             val query = dnsQuery(hostname)
-            val response = runCatching { udpDns(dnsServer, query) }
-                .recoverCatching { tcpDns(dnsServer, query) }
-                .getOrElse {
-                    throw IllegalStateException(
-                        "DNS через VPN не отвечает: ${it.message ?: it.javaClass.simpleName}.",
-                        it,
+            onStageStarted(VpnHealthStage.DnsUdpProbe)
+            val udp = try {
+                udpDns(dnsServer, query)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Throwable) {
+                onStageFinished(
+                    VpnHealthStage.DnsUdpProbe,
+                    VpnHealthStageOutcome.Recovered,
+                    rootCauseName(error),
+                )
+                null
+            }
+            if (udp != null) {
+                try {
+                    val rcode = validateDnsResponse(query, udp)
+                    onStageFinished(
+                        VpnHealthStage.DnsUdpProbe,
+                        VpnHealthStageOutcome.Success,
+                        "response_bytes=${udp.size} rcode=$rcode",
                     )
+                    return@withContext
+                } catch (error: Throwable) {
+                    onStageFinished(
+                        VpnHealthStage.DnsUdpProbe,
+                        VpnHealthStageOutcome.Failed,
+                        rootCauseName(error),
+                    )
+                    throw error
                 }
-            validateDnsResponse(query, response)
+            }
+
+            onStageStarted(VpnHealthStage.DnsTcpProbe)
+            val tcp = try {
+                tcpDns(dnsServer, query)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Throwable) {
+                onStageFinished(
+                    VpnHealthStage.DnsTcpProbe,
+                    VpnHealthStageOutcome.Failed,
+                    rootCauseName(error),
+                )
+                throw IllegalStateException(
+                    "DNS через VPN не отвечает: ${error.message ?: error.javaClass.simpleName}.",
+                    error,
+                )
+            }
+            try {
+                val rcode = validateDnsResponse(query, tcp)
+                onStageFinished(
+                    VpnHealthStage.DnsTcpProbe,
+                    VpnHealthStageOutcome.Success,
+                    "response_bytes=${tcp.size} rcode=$rcode",
+                )
+            } catch (error: Throwable) {
+                onStageFinished(
+                    VpnHealthStage.DnsTcpProbe,
+                    VpnHealthStageOutcome.Failed,
+                    rootCauseName(error),
+                )
+                throw error
+            }
         }
 
     private fun udpDns(dnsServer: String, query: ByteArray): ByteArray {
@@ -225,7 +353,7 @@ class VpnHealthPipeline(
         }
     }
 
-    private fun validateDnsResponse(query: ByteArray, response: ByteArray) {
+    private fun validateDnsResponse(query: ByteArray, response: ByteArray): Int {
         if (response.size < 12 || response[0] != query[0] || response[1] != query[1]) {
             error("DNS через VPN вернул некорректный ответ.")
         }
@@ -233,9 +361,10 @@ class VpnHealthPipeline(
         if (flags and 0x8000 == 0 || flags and 0x000f != 0) {
             error("DNS через VPN вернул ошибку ${flags and 0x000f}.")
         }
+        return flags and 0x000f
     }
 
-    private suspend fun httpsProbe(vpnNetwork: Network) = withContext(Dispatchers.IO) {
+    private suspend fun httpsProbe(vpnNetwork: Network): Int = withContext(Dispatchers.IO) {
         val connection = vpnNetwork.openConnection(URL(HEALTH_URL)) as HttpsURLConnection
         try {
             connection.connectTimeout = HTTPS_TIMEOUT_MILLIS
@@ -246,6 +375,7 @@ class VpnHealthPipeline(
             connection.requestMethod = "GET"
             val status = connection.responseCode
             if (status != 204) throw UnexpectedHttpsStatus(status)
+            status
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (error: Throwable) {
@@ -270,6 +400,13 @@ class VpnHealthPipeline(
             else -> cause.javaClass.simpleName.ifBlank { "неизвестная сетевая ошибка" }
         }
     }
+
+    private fun rootCauseName(error: Throwable): String =
+        generateSequence(error) { it.cause }
+            .last()
+            .javaClass
+            .simpleName
+            .take(80)
 
     private class UnexpectedHttpsStatus(val status: Int) : IOException()
 

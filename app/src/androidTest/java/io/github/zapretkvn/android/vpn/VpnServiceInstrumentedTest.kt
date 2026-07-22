@@ -18,6 +18,7 @@ import io.github.zapretkvn.android.ZapretApplication
 import io.github.zapretkvn.android.config.ConfigAnalyzer
 import io.github.zapretkvn.android.config.DnsMode
 import io.github.zapretkvn.android.diagnostics.DiagnosticAttemptOutcome
+import io.github.zapretkvn.android.diagnostics.DiagnosticStageStatus
 import io.github.zapretkvn.android.profiles.ProfileMetadata
 import io.github.zapretkvn.android.profiles.ProfileSource
 import io.github.zapretkvn.android.routing.InstalledRuleSets
@@ -743,6 +744,11 @@ class VpnServiceInstrumentedTest {
             val state = startAndAwaitTerminal(container.vpnController, profile.id)
             assertTrue(state is VpnConnectionState.Error)
             assertTrue((state as VpnConnectionState.Error).message.contains("DNS через VPN"))
+            val dnsStage = container.vpnController.diagnostics.value.connectionAttempt
+                ?.stages
+                ?.singleOrNull { it.key == "dns_udp" }
+            assertEquals(DiagnosticStageStatus.Failed, dnsStage?.status)
+            assertEquals("test_override", dnsStage?.detail)
             awaitCompletelyIdle(context)
 
             val ordinary = withTimeout(10_000) {

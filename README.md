@@ -44,6 +44,11 @@ MTU TUN по умолчанию остаётся 1500, а для WireGuard/Amnez
 применяется Android-совместимый внутренний MTU 1280, как в официальном клиенте
 Amnezia. Явное значение из `.conf` или JSON всегда имеет приоритет.
 
+Android AAR также применяет один открытый воспроизводимый patch поверх pinned commit:
+как официальный AmneziaWG backend, он запрещает WireGuard менять peer endpoint после
+аутентифицированных пакетов на Android. Upstream commit и отдельный SHA-256 patchset
+публикуются в диагностике и release metadata.
+
 ## Скрытие VPN без root
 
 В «Настройки → Скрытие VPN» находятся меры, которые реально доступны обычному

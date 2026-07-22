@@ -67,12 +67,29 @@ class DiagnosticModelsTest {
     }
 
     @Test
-    fun `startup log window preserves first and last evidence while history stays bounded`() {
-        val startup = (0 until 60).fold(emptyList<DiagnosticLogLine>()) { lines, index ->
-            lines.appendStartupWindow(
-                DiagnosticLogLine(5, "startup-$index", index.toLong()),
+    fun `startup priority ring preserves handshake evidence while history stays bounded`() {
+        var startup = emptyList<DiagnosticLogLine>()
+        var stats = DiagnosticLogStats()
+        (0 until 80).forEach { index ->
+            val line = if (index == 30) {
+                CoreDiagnosticClassifier.classify(5, "wireguard received handshake response")
+                    .copy(receivedAtEpochMillis = index.toLong(), lastReceivedAtEpochMillis = index.toLong())
+            } else {
+                DiagnosticLogLine(
+                    level = 5,
+                    message = "routine-$index",
+                    receivedAtEpochMillis = index.toLong(),
+                    source = DiagnosticLogSource.Core,
+                )
+            }
+            startup.appendPrioritizedBounded(
+                line,
+                stats,
                 MAX_DIAGNOSTIC_STARTUP_LOG_LINES,
-            )
+            ).also {
+                startup = it.lines
+                stats = it.stats
+            }
         }
         val attempts = (1L..4L).map { generation ->
             DiagnosticConnectionAttempt(
@@ -82,6 +99,7 @@ class DiagnosticModelsTest {
                 startedAtElapsedRealtimeMillis = generation,
                 outcome = DiagnosticAttemptOutcome.Connected,
                 startupCoreLogs = startup,
+                startupCoreLogStats = stats,
             )
         }
         val state = DiagnosticState(
@@ -90,11 +108,64 @@ class DiagnosticModelsTest {
         )
 
         assertEquals(MAX_DIAGNOSTIC_STARTUP_LOG_LINES, startup.size)
-        assertEquals("startup-0", startup.first().message)
-        assertEquals("startup-19", startup[19].message)
-        assertEquals("startup-40", startup[20].message)
-        assertEquals("startup-59", startup.last().message)
+        assertTrue(startup.any { it.message == "wireguard received handshake response" })
+        assertFalse(startup.any { it.message == "routine-0" })
+        assertEquals(80L, stats.receivedLines)
+        assertEquals(32L, stats.droppedLines)
         assertEquals(listOf(2L, 3L, 4L), state.recentConnectionAttempts.map { it.generation })
+    }
+
+    @Test
+    fun `repeated core messages are coalesced instead of growing the ring`() {
+        var lines = emptyList<DiagnosticLogLine>()
+        var stats = DiagnosticLogStats()
+        repeat(100) { index ->
+            val line = DiagnosticLogLine(
+                level = 5,
+                message = "same packet noise",
+                receivedAtEpochMillis = index.toLong(),
+                source = DiagnosticLogSource.Core,
+                lastReceivedAtEpochMillis = index.toLong(),
+            )
+            lines.appendPrioritizedBounded(line, stats, limit = 8).also {
+                lines = it.lines
+                stats = it.stats
+            }
+        }
+
+        assertEquals(1, lines.size)
+        assertEquals(100, lines.single().repeatCount)
+        assertEquals(99L, stats.coalescedLines)
+        assertEquals(0L, stats.droppedLines)
+    }
+
+    @Test
+    fun `classifier marks transport evidence but not ordinary dns traffic as priority`() {
+        val handshake = CoreDiagnosticClassifier.classify(5, "wireguard received handshake response")
+        val dnsNoise = CoreDiagnosticClassifier.classify(5, "dns query example")
+        val error = CoreDiagnosticClassifier.classify(2, "generic failure")
+
+        assertEquals(DiagnosticLogCategory.WireGuard, handshake.category)
+        assertTrue(handshake.priority)
+        assertEquals(DiagnosticLogCategory.Dns, dnsNoise.category)
+        assertFalse(dnsNoise.priority)
+        assertTrue(error.priority)
+    }
+
+    @Test
+    fun `core callback collector is capped and replaces routine noise with handshake evidence`() {
+        val collector = CoreDiagnosticBatchCollector(limit = 3)
+        collector.add(5, "routine one")
+        collector.add(5, "routine two")
+        collector.add(5, "routine three")
+        collector.add(5, "wireguard received handshake response")
+        collector.add(5, "routine four")
+        val batch = collector.result()
+
+        assertEquals(3, batch.entries.size)
+        assertTrue(batch.entries.any { it.second.contains("received handshake response") })
+        assertFalse(batch.entries.any { it.second == "routine one" })
+        assertEquals(2, batch.droppedLines)
     }
 
     @Test

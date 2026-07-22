@@ -112,8 +112,9 @@ printf '%s\n' "${ARTIFACTS[@]}" | jq -s \
     --arg application_id "io.github.zapretkvn.android" \
     --arg core_tag "$CORE_TAG" \
     --arg core_commit "$CORE_COMMIT" \
+    --arg core_patch_sha256 "$CORE_PATCH_SHA256" \
     --arg signer_sha256 "$SIGNER_SHA256" \
-    '{schema:2,version_name:$version_name,version_code:$version_code,application_id:$application_id,core_tag:$core_tag,core_commit:$core_commit,signer_sha256:$signer_sha256,artifacts:.}' \
+    '{schema:2,version_name:$version_name,version_code:$version_code,application_id:$application_id,core_tag:$core_tag,core_commit:$core_commit,core_patch_sha256:$core_patch_sha256,signer_sha256:$signer_sha256,artifacts:.}' \
     > "$OUTPUT_DIR/release-metadata-v2.json"
 
 # Keep the schema-1 arm64 manifest so already-installed arm64 versions can cross
@@ -124,11 +125,12 @@ jq -n \
     --arg application_id "io.github.zapretkvn.android" \
     --arg core_tag "$CORE_TAG" \
     --arg core_commit "$CORE_COMMIT" \
+    --arg core_patch_sha256 "$CORE_PATCH_SHA256" \
     --arg signer_sha256 "$SIGNER_SHA256" \
     --arg apk_file "$ARM64_APK_NAME" \
     --arg apk_sha256 "$ARM64_APK_SHA256" \
     --argjson apk_size "$ARM64_APK_SIZE" \
-    '{schema:1,version_name:$version_name,version_code:$version_code,application_id:$application_id,core_tag:$core_tag,core_commit:$core_commit,signer_sha256:$signer_sha256,abi:["arm64-v8a"],apk_file:$apk_file,apk_sha256:$apk_sha256,apk_size:$apk_size}' \
+    '{schema:1,version_name:$version_name,version_code:$version_code,application_id:$application_id,core_tag:$core_tag,core_commit:$core_commit,core_patch_sha256:$core_patch_sha256,signer_sha256:$signer_sha256,abi:["arm64-v8a"],apk_file:$apk_file,apk_sha256:$apk_sha256,apk_size:$apk_size}' \
     > "$OUTPUT_DIR/release-metadata.json"
 
 {
@@ -140,6 +142,7 @@ jq -n \
         '- APK: отдельные arm64-v8a, armeabi-v7a и x86_64' \
         "- Core tag: \`$CORE_TAG\`" \
         "- Core commit: \`$CORE_COMMIT\`" \
+        "- Core patch SHA-256: \`$CORE_PATCH_SHA256\`" \
         "- Signing certificate SHA-256: \`$SIGNER_SHA256\`"
     for artifact in "${ARTIFACTS[@]}"; do
         printf -- '- %s APK SHA-256: `%s`\n' \

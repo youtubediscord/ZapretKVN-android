@@ -1,0 +1,20 @@
+diff --git a/transport/wireguard/endpoint.go b/transport/wireguard/endpoint.go
+--- a/transport/wireguard/endpoint.go
++++ b/transport/wireguard/endpoint.go
+@@ -10,5 +10,6 @@ import (
+ 	"os"
+ 	"reflect"
++	"runtime"
+ 	"strconv"
+ 	"strings"
+ 	"time"
+@@ -256,6 +257,9 @@ func (e *Endpoint) Start(stage adapter.StartStage) error {
+ 		wgDevice.Close()
+ 		return E.Cause(err, "setup wireguard: \n", ipcConf.String())
+ 	}
++	if runtime.GOOS == "android" {
++		wgDevice.DisableSomeRoamingForBrokenMobileSemantics()
++	}
+ 	e.device = wgDevice
+ 	e.pause = service.FromContext[pause.Manager](e.options.Context)
+ 	if e.pause != nil {

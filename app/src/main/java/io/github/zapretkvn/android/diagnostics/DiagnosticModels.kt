@@ -65,6 +65,11 @@ data class DiagnosticLogLine(
     val level: Int,
     val message: String,
     val receivedAtEpochMillis: Long,
+    val source: DiagnosticLogSource = DiagnosticLogSource.Application,
+    val category: DiagnosticLogCategory = DiagnosticLogCategory.Other,
+    val priority: Boolean = false,
+    val repeatCount: Int = 1,
+    val lastReceivedAtEpochMillis: Long = receivedAtEpochMillis,
 ) {
     val levelName: String
         get() = when (level) {
@@ -78,6 +83,118 @@ data class DiagnosticLogLine(
             7 -> "TRACE"
             else -> "LOG"
         }
+}
+
+enum class DiagnosticLogSource(val code: String) {
+    Application("app"),
+    Core("core"),
+}
+
+enum class DiagnosticLogCategory(val code: String) {
+    Lifecycle("lifecycle"),
+    AndroidNetwork("android_network"),
+    Tun("tun"),
+    WireGuard("wireguard"),
+    Dns("dns"),
+    Https("https"),
+    Routing("routing"),
+    Other("other"),
+}
+
+data class DiagnosticLogStats(
+    val receivedLines: Long = 0,
+    val coalescedLines: Long = 0,
+    val droppedLines: Long = 0,
+)
+
+data class DiagnosticLogAppendResult(
+    val lines: List<DiagnosticLogLine>,
+    val stats: DiagnosticLogStats,
+)
+
+data class CoreDiagnosticBatch(
+    val entries: List<Pair<Int, String>>,
+    val droppedLines: Int,
+)
+
+/** Caps each libbox callback before it can trigger StateFlow allocations. */
+class CoreDiagnosticBatchCollector(
+    private val limit: Int = MAX_DIAGNOSTIC_CORE_BATCH_LINES,
+) {
+    private val retained = ArrayList<Pair<Int, String>>(limit.coerceAtLeast(0))
+    private var dropped = 0
+
+    fun add(level: Int, rawMessage: String) {
+        val message = rawMessage.take(MAX_DIAGNOSTIC_LOG_LINE_CHARS)
+        val candidate = level to message
+        if (retained.size < limit) {
+            retained += candidate
+            return
+        }
+        if (CoreDiagnosticClassifier.isPotentiallyImportant(level, message)) {
+            val routineIndex = retained.indexOfFirst { (savedLevel, savedMessage) ->
+                !CoreDiagnosticClassifier.isPotentiallyImportant(savedLevel, savedMessage)
+            }
+            if (routineIndex >= 0) {
+                retained.removeAt(routineIndex)
+                retained += candidate
+            }
+        }
+        dropped++
+    }
+
+    fun result(): CoreDiagnosticBatch = CoreDiagnosticBatch(retained.toList(), dropped)
+}
+
+object CoreDiagnosticClassifier {
+    fun classify(level: Int, message: String): DiagnosticLogLine {
+        val normalized = message.lowercase()
+        val category = when {
+            WIREGUARD_MARKERS.any(normalized::contains) -> DiagnosticLogCategory.WireGuard
+            DNS_MARKERS.any(normalized::contains) -> DiagnosticLogCategory.Dns
+            TUN_MARKERS.any(normalized::contains) -> DiagnosticLogCategory.Tun
+            ROUTING_MARKERS.any(normalized::contains) -> DiagnosticLogCategory.Routing
+            NETWORK_MARKERS.any(normalized::contains) -> DiagnosticLogCategory.AndroidNetwork
+            else -> DiagnosticLogCategory.Other
+        }
+        val priority = level <= 3 || PRIORITY_MARKERS.any(normalized::contains)
+        return DiagnosticLogLine(
+            level = level,
+            message = message,
+            receivedAtEpochMillis = System.currentTimeMillis(),
+            source = DiagnosticLogSource.Core,
+            category = category,
+            priority = priority,
+        )
+    }
+
+    fun isPotentiallyImportant(level: Int, message: String): Boolean =
+        level <= 3 || PRIORITY_MARKERS.any(message.lowercase()::contains)
+
+    private val WIREGUARD_MARKERS = listOf("wireguard", "handshake", "peer(", "peer ")
+    private val DNS_MARKERS = listOf("dns", "domain resolver", "rcode")
+    private val TUN_MARKERS = listOf("tun", "protect(", "protect fd", "interface monitor")
+    private val ROUTING_MARKERS = listOf("route", "rule-set", "rule_set", "outbound")
+    private val NETWORK_MARKERS = listOf("network", "interface", "endpoint")
+    private val PRIORITY_MARKERS = listOf(
+        "uapi:",
+        "received handshake",
+        "sending handshake",
+        "handshake did not",
+        "invalid handshake",
+        "endpoint changed",
+        "endpoint updated",
+        "update endpoint",
+        "new endpoint",
+        "protect(",
+        "protect fd",
+        "timeout",
+        "timed out",
+        "deadline exceeded",
+        "connection refused",
+        "failed",
+        "error",
+    )
 }
 
 data class DiagnosticNetworkState(
@@ -100,6 +217,7 @@ data class DiagnosticVpnPolicy(
 enum class DiagnosticStageStatus(val code: String) {
     Running("running"),
     Success("success"),
+    Recovered("recovered"),
     Failed("failed"),
     Cancelled("cancelled"),
 }
@@ -118,6 +236,7 @@ data class DiagnosticStageTiming(
     internal val startedAtElapsedRealtimeMillis: Long,
     val durationMillis: Long? = null,
     val status: DiagnosticStageStatus = DiagnosticStageStatus.Running,
+    val detail: String? = null,
 )
 
 data class DiagnosticConnectionAttempt(
@@ -129,6 +248,7 @@ data class DiagnosticConnectionAttempt(
     val outcome: DiagnosticAttemptOutcome = DiagnosticAttemptOutcome.Running,
     val stages: List<DiagnosticStageTiming> = emptyList(),
     val startupCoreLogs: List<DiagnosticLogLine> = emptyList(),
+    val startupCoreLogStats: DiagnosticLogStats = DiagnosticLogStats(),
     val failure: DiagnosticFailure? = null,
 ) {
     val slowestCompletedStage: DiagnosticStageTiming?
@@ -142,7 +262,9 @@ data class DiagnosticState(
     val generation: Long = 0,
     val lastFailure: DiagnosticFailure? = null,
     val applicationLogs: List<DiagnosticLogLine> = emptyList(),
+    val applicationLogStats: DiagnosticLogStats = DiagnosticLogStats(),
     val coreLogs: List<DiagnosticLogLine> = emptyList(),
+    val coreLogStats: DiagnosticLogStats = DiagnosticLogStats(),
     val logStreamActive: Boolean = false,
     val network: DiagnosticNetworkState? = null,
     val vpnPolicy: DiagnosticVpnPolicy? = null,
@@ -150,6 +272,7 @@ data class DiagnosticState(
     val connectionAttempt: DiagnosticConnectionAttempt? = null,
     val previousConnectionAttempts: List<DiagnosticConnectionAttempt> = emptyList(),
     val previousCrash: AppCrashRecord? = null,
+    val previousProcessExit: AppProcessExitRecord? = null,
 ) {
     val recentConnectionAttempts: List<DiagnosticConnectionAttempt>
         get() = (previousConnectionAttempts + listOfNotNull(connectionAttempt))
@@ -158,7 +281,12 @@ data class DiagnosticState(
     val logs: List<DiagnosticLogLine>
         get() = (applicationLogs + coreLogs)
             .sortedBy(DiagnosticLogLine::receivedAtEpochMillis)
-            .takeLast(MAX_DIAGNOSTIC_LOG_LINES)
+            .fold(emptyList()) { retained, line ->
+                retained.appendPrioritizedBounded(
+                    line = line,
+                    limit = MAX_DIAGNOSTIC_LOG_LINES,
+                ).lines
+            }
 }
 
 internal fun List<DiagnosticLogLine>.appendBounded(
@@ -166,19 +294,59 @@ internal fun List<DiagnosticLogLine>.appendBounded(
     limit: Int = MAX_DIAGNOSTIC_LOG_LINES,
 ): List<DiagnosticLogLine> = (this + line).takeLast(limit)
 
-/** Keeps startup evidence from both sides of a noisy bounded log stream. */
-internal fun List<DiagnosticLogLine>.appendStartupWindow(
+/**
+ * In-memory priority ring. Repeated adjacent messages are coalesced and salient
+ * handshake/TUN/errors survive routine packet noise. Nothing is written to disk.
+ */
+internal fun List<DiagnosticLogLine>.appendPrioritizedBounded(
     line: DiagnosticLogLine,
+    stats: DiagnosticLogStats = DiagnosticLogStats(),
     limit: Int = MAX_DIAGNOSTIC_STARTUP_LOG_LINES,
-): List<DiagnosticLogLine> {
-    if (limit <= 0) return emptyList()
-    if (size < limit) return this + line
-    val headSize = limit / 2
-    val tailSize = limit - headSize
-    return take(headSize) + (drop(headSize) + line).takeLast(tailSize)
+): DiagnosticLogAppendResult {
+    val received = stats.copy(receivedLines = stats.receivedLines + 1)
+    val last = lastOrNull()
+    if (last != null && last.sameDiagnosticMessage(line)) {
+        return DiagnosticLogAppendResult(
+            lines = dropLast(1) + last.copy(
+                repeatCount = last.repeatCount + 1,
+                lastReceivedAtEpochMillis = line.lastReceivedAtEpochMillis,
+            ),
+            stats = received.copy(coalescedLines = received.coalescedLines + 1),
+        )
+    }
+    if (limit <= 0) {
+        return DiagnosticLogAppendResult(emptyList(), received.copy(droppedLines = received.droppedLines + 1))
+    }
+    if (size < limit) return DiagnosticLogAppendResult(this + line, received)
+
+    val routineIndex = indexOfFirst { !it.priority }
+    if (!line.priority && routineIndex < 0) {
+        return DiagnosticLogAppendResult(
+            this,
+            received.copy(droppedLines = received.droppedLines + line.repeatCount),
+        )
+    }
+    val removeIndex = if (routineIndex >= 0) routineIndex else 0
+    val removed = this[removeIndex]
+    val next = toMutableList().apply {
+        removeAt(removeIndex)
+        add(line)
+    }
+    return DiagnosticLogAppendResult(
+        next,
+        received.copy(droppedLines = received.droppedLines + removed.repeatCount),
+    )
 }
 
+private fun DiagnosticLogLine.sameDiagnosticMessage(other: DiagnosticLogLine): Boolean =
+    level == other.level &&
+        source == other.source &&
+        category == other.category &&
+        message == other.message
+
 const val MAX_DIAGNOSTIC_LOG_LINES = 80
-const val MAX_DIAGNOSTIC_STARTUP_LOG_LINES = 40
+const val MAX_DIAGNOSTIC_STARTUP_LOG_LINES = 48
+const val MAX_DIAGNOSTIC_CORE_BATCH_LINES = 48
+const val MAX_DIAGNOSTIC_LOG_LINE_CHARS = 600
 const val MAX_DIAGNOSTIC_ATTEMPTS = 3
 const val MAX_DIAGNOSTIC_STAGES = 20

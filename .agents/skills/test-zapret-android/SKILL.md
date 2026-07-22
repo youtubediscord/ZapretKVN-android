@@ -96,6 +96,13 @@ Before treating an attachment as app evidence, verify that it is JSON and contai
 jq -e '.report_version >= 2 and (.app | type == "object")' zapret-kvn-diagnostic.json
 ```
 
+Reports v3 additionally contain the core patch SHA-256, granular core/TUN/DNS/HTTPS
+stage timings, priority core-log categories, received/coalesced/dropped counters,
+runtime resource counters and one prior Android process-exit reason on API 30+.
+`dropped_lines` means routine in-memory evidence exceeded a fixed quota; runtime logs
+are still never persisted or copied to Logcat. Confirm that relevant handshake/TUN/error
+records survived before requesting a larger external logcat capture.
+
 ## Capture Android network state
 
 List available services before calling a vendor-dependent `dumpsys` target:
@@ -149,6 +156,11 @@ For VPN/DNS/TUN failures, require:
 - available connectivity/netd dumps only when they add relevant state.
 
 For intermittent failures, collect at least one success and one failure from the same APK/device/network. Preserve attempt history before the app restarts.
+
+For the Android WireGuard roaming fix, record both `core.revision` and
+`core.patch_sha256`. Compare Test 13 with Test 12 using the same profile, DNS mode,
+MTU, device and network; the patch is implemented but its causal effect is not proven
+until the physical A/B succeeds.
 
 For routing/per-app failures, also record the selected package, include/exclude mode, whether the control app was selected, and IPv4/IPv6/TCP/UDP/QUIC result without including credentials.
 

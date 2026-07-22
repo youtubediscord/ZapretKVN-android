@@ -13,6 +13,10 @@ MANIFEST="$PROJECT_ROOT/app/src/main/AndroidManifest.xml"
 [[ -f "$PROJECT_ROOT/app/src/main/res/raw/sing_box_extended_license.txt" ]]
 [[ -f "$PROJECT_ROOT/app/src/main/res/raw/sing_geoip_license.txt" ]]
 [[ -f "$PROJECT_ROOT/audit/core/rule_set_performance_test.go" ]]
+[[ -f "$PROJECT_ROOT/scripts/core-patchset.sh" ]]
+source "$PROJECT_ROOT/core.properties"
+source "$PROJECT_ROOT/scripts/core-patchset.sh"
+verify_core_patchset "$PROJECT_ROOT"
 [[ -f "$PROJECT_ROOT/scripts/gate8-performance-summary.jq" ]]
 
 RELEASE_WORKFLOW="$PROJECT_ROOT/.github/workflows/release.yml"
@@ -53,7 +57,7 @@ mapfile -t ANDROID_MODULES < <(
         | sed "s|$PROJECT_ROOT/||" \
         | sort
 )
-EXPECTED_ANDROID_MODULES=(app network-bootstrap wireguard-import)
+EXPECTED_ANDROID_MODULES=(app app-updater network-bootstrap wireguard-import)
 if [[ "${ANDROID_MODULES[*]}" != "${EXPECTED_ANDROID_MODULES[*]}" ]]; then
     echo "Unexpected Android module set: ${ANDROID_MODULES[*]:-none}" >&2
     exit 1

@@ -4,6 +4,8 @@
 
 - Source: <https://github.com/shtorm-7/sing-box-extended>
 - Pinned commit: `ff11f007ec798136a5de258f947a4f34011a37ea`
+- Android patch: `core-patches/0001-android-disable-wireguard-endpoint-roaming.patch`
+- Patch SHA-256: `715e79e0b03d499be36dc5dbb8ee5b10b3138a0dbaea338c11c911a02f7fb171`
 - License: GNU General Public License version 3 or later.
 - Copyright: 2022 nekohasekai and contributors.
 
@@ -12,6 +14,8 @@ Pinned source additionally states that no derivative work may use the name of, o
 Release artifacts must include corresponding source/build instructions required by the license.
 The exact pinned license text, including the additional naming condition, is
 also retained as an application raw resource and as a CI core artifact.
+The patch is applied only after verifying the pinned checkout and patch hash,
+is recorded separately from the upstream revision, and is reversed after compilation.
 
 ## SagerNet sing-geoip rule-set
 

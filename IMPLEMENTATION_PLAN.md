@@ -137,6 +137,7 @@ MVP готов только когда выполнены все пункты:
 - [x] `I2-16` Получать selector-группы/текущий server через libbox и переключать активный server вызовом `CommandClient.SelectOutbound()` без restart TUN/core.
 - [x] `I2-17` Перед switch собрать JSON с новым `selector.default`, выполнить `CheckConfig()` и атомарно сохранить; при ошибке runtime switch сделать один контролируемый restart.
 - [x] `I2-18` Для managed selector включить `interrupt_exist_connections=true`; проверить, что закрываются только proxy-соединения selector, а `direct` и приложения вне TUN не затрагиваются.
+- [x] `I2-18A` Поверх exact core commit применять один проверяемый Android patch, вызывающий WireGuard `DisableSomeRoamingForBrokenMobileSemantics()` после `IpcSet`; публиковать patch SHA-256 во всех build/release/diagnostic metadata и возвращать source checkout в чистое состояние после сборки. Physical A/B остаётся в `P16`.
 
 ### Тесты и Gate 2
 
@@ -313,16 +314,17 @@ UI-настройка и не запускает фоновые обновлен
 
 - [x] `I6-14` Показывать короткий тип ошибки и раскрываемые последние bounded log lines.
 - [x] `I6-14A` Записывать bounded event timeline каждой попытки подключения/restart: общая длительность, статусы этапов и самый долгий этап; только monotonic event timestamps, без ticker/polling.
-- [x] `I6-14B` Атомарно хранить только последний redacted uncaught Kotlin/Java crash в `noBackupFilesDir`; runtime/core traffic logs на диск не писать. Native crash и ANR остаются явным ограничением.
+- [x] `I6-14B` Атомарно хранить только последний redacted uncaught Kotlin/Java crash в `noBackupFilesDir`; runtime/core traffic logs на диск не писать. На API 30+ читать одну системную process-exit запись для native crash/ANR без копирования тяжёлого trace.
+- [x] `I6-14C` Заменить head/tail startup-окно на priority ring: handshake/endpoint/TUN/error сохраняются, повторы схлопываются, один callback принимает не более 48 записей, а received/coalesced/dropped counters экспортируются.
 - [x] `I6-15` Создавать redacted diagnostic JSON только по действию пользователя.
 - [x] `I6-16` Экспортировать через Android Sharesheet/FileProvider и удалять временный файл при следующем запуске.
 - [x] `I6-17` Включать core/app version, Android/API, network state, Private DNS mode и effective overlay без секретов.
 
 Диагностика не является отдельным Gradle-модулем и не добавляет постоянного фонового сборщика. `CommandLog` подписывается
 отдельным клиентом на время connect health-check и при `Activity STARTED` с открытым
-экраном. В памяти остаются три последние попытки, до 40 startup core-строк на каждую
-(первые 20 строк запуска и последние 20 строк перед итогом)
-и отдельные последние 80 общих строк; клиент закрывается идемпотентно после успешной
+экраном. В памяти остаются три последние попытки, до 48 приоритетных startup core-записей
+на каждую и отдельные 80 общих записей; повторы схлопываются, шум вытесняется раньше
+handshake/TUN/errors, а counters честно показывают отброшенное. Клиент закрывается идемпотентно после успешной
 проверки, вместе с экраном или service. Runtime-лог на диск не пишется. Effective overlay — структурная
 сводка managed `zapret-*`: режим DNS, наличие dual-stack TUN, типы managed DNS,
 количество правил/actions, локальные rule-set и bounded hardening-state без endpoint,
@@ -331,9 +333,10 @@ match values или секретов.
 Вся suspend-цепочка connect/restart ограничена одним 30-секундным deadline. Timeout
 завершается fail-close с `VPN-120` и не создаёт периодический watchdog или retry-loop.
 
-Отчёт версии 2 создаётся только кнопкой, содержит app/core revision, Android/API,
+Отчёт версии 3 создаётся только кнопкой, содержит app/core revision+patch SHA-256, Android/API/ABI,
 VPN/non-VPN network state, Private DNS, последнюю классифицированную ошибку, безопасный
-overlay, bounded connection timeline, последний redacted app crash и bounded log lines. Он не содержит raw JSON, имя профиля, packages, внешний IP
+overlay, bounded connection timeline, runtime resource/log counters, последний redacted app crash,
+одну Android process-exit запись и bounded log lines. Он не содержит raw JSON, имя профиля, packages, внешний IP
 или credentials. Единственный временный файл находится в `cache/diagnostics/`, доступен
 через `FileProvider` с `exported=false` и read grant Sharesheet, а `AppContainer` удаляет
 его при следующем запуске.

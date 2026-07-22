@@ -4,9 +4,13 @@ set -euo pipefail
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck disable=SC1090,SC1091
 source "$PROJECT_ROOT/core.properties"
+# shellcheck disable=SC1091
+source "$PROJECT_ROOT/scripts/core-patchset.sh"
 : "${CORE_REPOSITORY:?Missing CORE_REPOSITORY}"
 : "${CORE_TAG:?Missing CORE_TAG}"
 : "${CORE_COMMIT:?Missing CORE_COMMIT}"
+: "${CORE_PATCH_FILE:?Missing CORE_PATCH_FILE}"
+: "${CORE_PATCH_SHA256:?Missing CORE_PATCH_SHA256}"
 : "${GO_VERSION:?Missing GO_VERSION}"
 : "${GOMOBILE_VERSION:?Missing GOMOBILE_VERSION}"
 : "${ANDROID_NDK_VERSION:?Missing ANDROID_NDK_VERSION}"
@@ -113,14 +117,21 @@ export PATH="$GOPATH/bin:$PATH"
 
 pushd "$SOURCE_DIR" >/dev/null
 
+CORE_PATCH_APPLIED=false
 cleanup_source_artifacts() {
     find "$SOURCE_DIR" -maxdepth 1 -type f \
         \( -name 'libbox.aar' -o -name 'libbox-legacy.aar' \) -delete
     rm -f "$SOURCE_DIR/dns/transport/fallback/zapret_audit_test.go"
     rm -f "$SOURCE_DIR/route/rule/zapret_performance_test.go"
+    if [[ "$CORE_PATCH_APPLIED" == true ]]; then
+        reverse_core_patchset "$PROJECT_ROOT" "$SOURCE_DIR"
+        CORE_PATCH_APPLIED=false
+    fi
 }
 trap cleanup_source_artifacts EXIT
 cleanup_source_artifacts
+apply_core_patchset "$PROJECT_ROOT" "$SOURCE_DIR"
+CORE_PATCH_APPLIED=true
 
 # The host-only verifier does not need naive/Cronet. Android libbox below is still
 # built by the pinned upstream builder with its complete Android tag set.
@@ -189,6 +200,8 @@ cat > "$OUTPUT_DIR/core-build-metadata.json" <<EOF
   "repository": "$CORE_REPOSITORY",
   "tag": "$CORE_TAG",
   "commit": "$CORE_COMMIT",
+  "patch_file": "$CORE_PATCH_FILE",
+  "patch_sha256": "$CORE_PATCH_SHA256",
   "go": "$GO_VERSION",
   "gomobile": "$GOMOBILE_VERSION",
   "android_ndk": "$ANDROID_NDK_VERSION",
@@ -201,6 +214,8 @@ LIBBOX_SHA256="$(sha256sum "$OUTPUT_DIR/libbox.aar" | awk '{print $1}')"
 cat > "$LIBS_DIR/libbox.properties" <<EOF
 CORE_TAG=$CORE_TAG
 CORE_COMMIT=$CORE_COMMIT
+CORE_PATCH_FILE=$CORE_PATCH_FILE
+CORE_PATCH_SHA256=$CORE_PATCH_SHA256
 LIBBOX_SHA256=$LIBBOX_SHA256
 EOF
 

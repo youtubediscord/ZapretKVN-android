@@ -22,6 +22,8 @@ import io.github.zapretkvn.android.config.RuntimeConfigOptions
 import io.github.zapretkvn.android.config.RuntimeConfigBuilder
 import io.github.zapretkvn.android.config.SelectorGroup
 import io.github.zapretkvn.android.diagnostics.EffectiveOverlaySummary
+import io.github.zapretkvn.android.diagnostics.CoreDiagnosticBatchCollector
+import io.github.zapretkvn.android.diagnostics.DiagnosticStageStatus
 import io.github.zapretkvn.android.diagnostics.SecretRedactor
 import io.github.zapretkvn.android.config.RuntimeConfigResult
 import io.github.zapretkvn.android.hardening.VpnRuntimeHardening
@@ -336,7 +338,7 @@ class ZapretVpnService : VpnService() {
             throw error
         }
 
-        controller.startConnectionDiagnosticStage(token, "core_tun", "Запуск core и создание TUN")
+        controller.startConnectionDiagnosticStage(token, "platform_adapter", "Подготовка Android VPN adapter")
         controller.publish(token, VpnConnectionState.Starting(profileId, "Создание TUN"))
         showForeground(ForegroundNotificationState.CreatingTun)
         val resources = ActiveSession(
@@ -359,10 +361,12 @@ class ZapretVpnService : VpnService() {
                 networkMonitor = networkMonitor,
                 sessionName = VpnRuntimeHardening.sessionName(vpnHiding),
             )
+            controller.startConnectionDiagnosticStage(token, "command_server", "Запуск локального command server")
             resources.server = Libbox.newCommandServer(
                 ServerHandler(this),
                 resources.platform,
             ).also(CommandServer::start)
+            controller.startConnectionDiagnosticStage(token, "core_service", "Запуск sing-box и создание TUN")
             resources.server?.startOrReloadService(
                 runtimeJson,
                 OverrideOptions().apply {
@@ -378,6 +382,7 @@ class ZapretVpnService : VpnService() {
             resources.markLibboxStarted()
             check(token == controller.currentGeneration()) { "Запуск отменён." }
 
+            controller.startConnectionDiagnosticStage(token, "group_client", "Чтение selector-групп")
             resources.client = Libbox.newCommandClient(
                 GroupClientHandler(
                     controller,
@@ -391,18 +396,35 @@ class ZapretVpnService : VpnService() {
             check(token == controller.currentGeneration()) { "Запуск отменён." }
             // Keep a bounded core log during startup so failed handshakes and DNS transports
             // remain diagnosable. It is closed after health unless Diagnostics is visible.
+            controller.startConnectionDiagnosticStage(token, "core_log", "Снимок bounded core-лога")
             resources.openLogClient(controller)
             controller.publish(token, VpnConnectionState.Starting(profileId, "Проверка DNS и HTTPS"))
             showForeground(ForegroundNotificationState.CheckingHealth)
             val dnsServer = resources.platform?.internalDnsServer
                 ?: error("libbox не передал внутренний DNS TUN.")
-            val health = container.vpnHealthPipeline.verify(dnsMode, dnsServer) { stage ->
-                controller.startConnectionDiagnosticStage(
-                    token,
-                    stage.diagnosticKey,
-                    stage.diagnosticLabel,
-                )
-            }
+            val health = container.vpnHealthPipeline.verify(
+                mode = dnsMode,
+                internalDnsServer = dnsServer,
+                onStageStarted = { stage ->
+                    controller.startConnectionDiagnosticStage(
+                        token,
+                        stage.diagnosticKey,
+                        stage.diagnosticLabel,
+                    )
+                },
+                onStageFinished = { stage, outcome, detail ->
+                    controller.finishConnectionDiagnosticStage(
+                        generation = token,
+                        key = stage.diagnosticKey,
+                        status = when (outcome) {
+                            VpnHealthStageOutcome.Success -> DiagnosticStageStatus.Success
+                            VpnHealthStageOutcome.Recovered -> DiagnosticStageStatus.Recovered
+                            VpnHealthStageOutcome.Failed -> DiagnosticStageStatus.Failed
+                        },
+                        detail = detail,
+                    )
+                },
+            )
             check(token == controller.currentGeneration()) { "Запуск отменён." }
             controller.startConnectionDiagnosticStage(token, "finalize", "Финализация сессии")
             container.proxyBootstrapper.recordSuccess(profileId, preparedBootstrap)
@@ -1079,10 +1101,13 @@ class ZapretVpnService : VpnService() {
         }
 
         override fun writeLogs(messageList: LogIterator) {
+            val collector = CoreDiagnosticBatchCollector()
             while (messageList.hasNext()) {
                 val entry = messageList.next()
-                controller.publishCoreDiagnosticLog(generation, entry.level, entry.message)
+                collector.add(entry.level, entry.message)
             }
+            val batch = collector.result()
+            controller.publishCoreDiagnosticLogs(generation, batch.entries, batch.droppedLines)
         }
     }
 

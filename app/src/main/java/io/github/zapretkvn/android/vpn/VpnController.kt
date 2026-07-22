@@ -9,19 +9,25 @@ import io.github.zapretkvn.android.diagnostics.DiagnosticFailure
 import io.github.zapretkvn.android.diagnostics.DiagnosticFailureClassifier
 import io.github.zapretkvn.android.diagnostics.DiagnosticAttemptOutcome
 import io.github.zapretkvn.android.diagnostics.DiagnosticConnectionAttempt
+import io.github.zapretkvn.android.diagnostics.DiagnosticLogCategory
 import io.github.zapretkvn.android.diagnostics.DiagnosticLogLine
+import io.github.zapretkvn.android.diagnostics.DiagnosticLogSource
+import io.github.zapretkvn.android.diagnostics.DiagnosticLogStats
 import io.github.zapretkvn.android.diagnostics.DiagnosticNetworkState
 import io.github.zapretkvn.android.diagnostics.DiagnosticState
 import io.github.zapretkvn.android.diagnostics.DiagnosticStageStatus
 import io.github.zapretkvn.android.diagnostics.DiagnosticStageTiming
 import io.github.zapretkvn.android.diagnostics.DiagnosticVpnPolicy
 import io.github.zapretkvn.android.diagnostics.AppCrashRecord
+import io.github.zapretkvn.android.diagnostics.AppProcessExitReader
 import io.github.zapretkvn.android.diagnostics.MAX_DIAGNOSTIC_ATTEMPTS
+import io.github.zapretkvn.android.diagnostics.MAX_DIAGNOSTIC_LOG_LINES
+import io.github.zapretkvn.android.diagnostics.MAX_DIAGNOSTIC_LOG_LINE_CHARS
 import io.github.zapretkvn.android.diagnostics.MAX_DIAGNOSTIC_STARTUP_LOG_LINES
 import io.github.zapretkvn.android.diagnostics.MAX_DIAGNOSTIC_STAGES
+import io.github.zapretkvn.android.diagnostics.CoreDiagnosticClassifier
 import io.github.zapretkvn.android.diagnostics.SecretRedactor
-import io.github.zapretkvn.android.diagnostics.appendBounded
-import io.github.zapretkvn.android.diagnostics.appendStartupWindow
+import io.github.zapretkvn.android.diagnostics.appendPrioritizedBounded
 import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -42,7 +48,12 @@ class VpnController(
     private val mutableMessage = MutableStateFlow<String?>(null)
     private val mutableHomeVisible = MutableStateFlow(false)
     private val mutableDiagnosticsVisible = MutableStateFlow(false)
-    private val mutableDiagnostics = MutableStateFlow(DiagnosticState(previousCrash = previousCrash))
+    private val mutableDiagnostics = MutableStateFlow(
+        DiagnosticState(
+            previousCrash = previousCrash,
+            previousProcessExit = AppProcessExitReader.read(context),
+        ),
+    )
     private val trafficAccumulator = SessionTrafficAccumulator()
     private val mutableSessionStats = MutableStateFlow(trafficAccumulator.value)
     private val trafficLock = Any()
@@ -190,6 +201,7 @@ class VpnController(
                 generation = generation,
                 lastFailure = null,
                 coreLogs = emptyList(),
+                coreLogStats = DiagnosticLogStats(),
                 logStreamActive = false,
                 network = null,
                 vpnPolicy = null,
@@ -229,6 +241,40 @@ class VpnController(
             current.copy(
                 connectionAttempt = attempt.copy(
                     stages = (completed + stage).takeLast(MAX_DIAGNOSTIC_STAGES),
+                ),
+            )
+        }
+    }
+
+    internal fun finishConnectionDiagnosticStage(
+        generation: Long,
+        key: String,
+        status: DiagnosticStageStatus,
+        detail: String? = null,
+    ) {
+        val elapsed = SystemClock.elapsedRealtime()
+        val safeDetail = detail
+            ?.let { sanitizeDiagnosticText(it, MAX_DIAGNOSTIC_STAGE_DETAIL_CHARS) }
+            ?.takeIf(String::isNotBlank)
+        mutableDiagnostics.update { current ->
+            val attempt = current.connectionAttempt
+                ?.takeIf { it.generation == generation && it.outcome == DiagnosticAttemptOutcome.Running }
+                ?: return@update current
+            val safeKey = key.take(48)
+            current.copy(
+                connectionAttempt = attempt.copy(
+                    stages = attempt.stages.map { stage ->
+                        if (stage.key == safeKey && stage.status == DiagnosticStageStatus.Running) {
+                            stage.copy(
+                                durationMillis = (elapsed - stage.startedAtElapsedRealtimeMillis)
+                                    .coerceAtLeast(0L),
+                                status = status,
+                                detail = safeDetail,
+                            )
+                        } else {
+                            stage
+                        }
+                    },
                 ),
             )
         }
@@ -351,28 +397,76 @@ class VpnController(
 
     internal fun clearCoreDiagnosticLogs(generation: Long) {
         if (generation != currentGeneration()) return
-        mutableDiagnostics.update { it.copy(coreLogs = emptyList()) }
+        mutableDiagnostics.update {
+            it.copy(
+                coreLogs = emptyList(),
+                coreLogStats = DiagnosticLogStats(),
+            )
+        }
     }
 
     internal fun publishCoreDiagnosticLog(generation: Long, level: Int, message: String) {
+        publishCoreDiagnosticLogs(generation, listOf(level to message), ingressDropped = 0)
+    }
+
+    internal fun publishCoreDiagnosticLogs(
+        generation: Long,
+        entries: List<Pair<Int, String>>,
+        ingressDropped: Int,
+    ) {
         if (generation != currentGeneration()) return
-        val safe = sanitizeDiagnosticText(message, MAX_DIAGNOSTIC_LINE_CHARS)
-        if (safe.isEmpty()) return
-        val line = DiagnosticLogLine(level, safe, System.currentTimeMillis())
+        val lines = entries.mapNotNull { (level, message) ->
+            val safe = sanitizeDiagnosticText(message, MAX_DIAGNOSTIC_LOG_LINE_CHARS)
+            safe.takeIf(String::isNotEmpty)?.let { CoreDiagnosticClassifier.classify(level, it) }
+        }
+        if (lines.isEmpty() && ingressDropped <= 0) return
         mutableDiagnostics.update { current ->
-            val attempt = current.connectionAttempt
-            val startupAttempt = if (attempt?.outcome == DiagnosticAttemptOutcome.Running) {
-                attempt.copy(
-                    startupCoreLogs = attempt.startupCoreLogs.appendStartupWindow(
+            var coreLogs = current.coreLogs
+            var coreStats = current.coreLogStats
+            var startupLogs = current.connectionAttempt?.startupCoreLogs.orEmpty()
+            var startupStats = current.connectionAttempt?.startupCoreLogStats
+                ?: DiagnosticLogStats()
+            lines.forEach { line ->
+                coreLogs.appendPrioritizedBounded(line, coreStats, MAX_DIAGNOSTIC_LOG_LINES).also {
+                    coreLogs = it.lines
+                    coreStats = it.stats
+                }
+                if (current.connectionAttempt?.outcome == DiagnosticAttemptOutcome.Running) {
+                    startupLogs.appendPrioritizedBounded(
                         line,
+                        startupStats,
                         MAX_DIAGNOSTIC_STARTUP_LOG_LINES,
-                    ),
+                    ).also {
+                        startupLogs = it.lines
+                        startupStats = it.stats
+                    }
+                }
+            }
+            if (ingressDropped > 0) {
+                coreStats = coreStats.copy(
+                    receivedLines = coreStats.receivedLines + ingressDropped,
+                    droppedLines = coreStats.droppedLines + ingressDropped,
                 )
-            } else {
-                attempt
+                if (current.connectionAttempt?.outcome == DiagnosticAttemptOutcome.Running) {
+                    startupStats = startupStats.copy(
+                        receivedLines = startupStats.receivedLines + ingressDropped,
+                        droppedLines = startupStats.droppedLines + ingressDropped,
+                    )
+                }
+            }
+            val startupAttempt = current.connectionAttempt?.let { attempt ->
+                if (attempt.outcome == DiagnosticAttemptOutcome.Running) {
+                    attempt.copy(
+                        startupCoreLogs = startupLogs,
+                        startupCoreLogStats = startupStats,
+                    )
+                } else {
+                    attempt
+                }
             }
             current.copy(
-                coreLogs = current.coreLogs.appendBounded(line),
+                coreLogs = coreLogs,
+                coreLogStats = coreStats,
                 connectionAttempt = startupAttempt,
             )
         }
@@ -448,6 +542,7 @@ class VpnController(
                         generation = generation,
                         lastFailure = null,
                         coreLogs = emptyList(),
+                        coreLogStats = DiagnosticLogStats(),
                         logStreamActive = false,
                         network = null,
                         vpnPolicy = null,
@@ -472,7 +567,14 @@ class VpnController(
                     technicalDetail = state.technicalDetail,
                     occurredAtEpochMillis = now,
                 )
-                val line = DiagnosticLogLine(level = 2, message = safe, receivedAtEpochMillis = now)
+                val line = DiagnosticLogLine(
+                    level = 2,
+                    message = safe,
+                    receivedAtEpochMillis = now,
+                    source = DiagnosticLogSource.Application,
+                    category = DiagnosticLogCategory.Lifecycle,
+                    priority = true,
+                )
                 mutableDiagnostics.update {
                     val attempt = it.connectionAttempt
                     val failedAttempt = if (attempt?.generation == generation) {
@@ -480,10 +582,16 @@ class VpnController(
                     } else {
                         attempt
                     }
+                    val application = it.applicationLogs.appendPrioritizedBounded(
+                        line,
+                        it.applicationLogStats,
+                        MAX_DIAGNOSTIC_LOG_LINES,
+                    )
                     it.copy(
                         generation = generation,
                         lastFailure = failure,
-                        applicationLogs = it.applicationLogs.appendBounded(line),
+                        applicationLogs = application.lines,
+                        applicationLogStats = application.stats,
                         logStreamActive = false,
                         connectionAttempt = failedAttempt,
                     )
@@ -552,9 +660,21 @@ class VpnController(
 
     private fun appendApplicationDiagnosticLog(level: Int, message: String) {
         if (message.isEmpty()) return
-        val line = DiagnosticLogLine(level, message.take(MAX_DIAGNOSTIC_LINE_CHARS), System.currentTimeMillis())
+        val line = DiagnosticLogLine(
+            level = level,
+            message = message.take(MAX_DIAGNOSTIC_LOG_LINE_CHARS),
+            receivedAtEpochMillis = System.currentTimeMillis(),
+            source = DiagnosticLogSource.Application,
+            category = DiagnosticLogCategory.Lifecycle,
+            priority = level <= 3,
+        )
         mutableDiagnostics.update {
-            it.copy(applicationLogs = it.applicationLogs.appendBounded(line))
+            val result = it.applicationLogs.appendPrioritizedBounded(
+                line,
+                it.applicationLogStats,
+                MAX_DIAGNOSTIC_LOG_LINES,
+            )
+            it.copy(applicationLogs = result.lines, applicationLogStats = result.stats)
         }
     }
 
@@ -572,7 +692,7 @@ class VpnController(
         .orEmpty()
 
     private companion object {
-        const val MAX_DIAGNOSTIC_LINE_CHARS = 600
+        const val MAX_DIAGNOSTIC_STAGE_DETAIL_CHARS = 160
         val ANSI_ESCAPE = Regex("\u001B(?:\\[[0-?]*[ -/]*[@-~]|[@-_])")
         val NEW_LINES = Regex("[\\r\\n]+")
         val SUPPORT_CODE = Regex("[A-Z]{2,5}-\\d{3}")

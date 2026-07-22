@@ -11,6 +11,8 @@ val coreProperties = Properties().apply {
 }
 val coreTag = coreProperties.getProperty("CORE_TAG")
 val coreCommit = coreProperties.getProperty("CORE_COMMIT")
+val corePatchFile = coreProperties.getProperty("CORE_PATCH_FILE")
+val corePatchSha256 = coreProperties.getProperty("CORE_PATCH_SHA256")
 val libboxAar = layout.projectDirectory.file("libs/libbox.aar").asFile
 val libboxMetadata = layout.projectDirectory.file("libs/libbox.properties").asFile
 val appVersionCode = providers.gradleProperty("zapretVersionCode")
@@ -82,6 +84,7 @@ android {
             "CORE_COMMIT",
             "\"$coreCommit\"",
         )
+        buildConfigField("String", "CORE_PATCH_SHA256", "\"$corePatchSha256\"")
     }
 
     signingConfigs {
@@ -177,6 +180,8 @@ val verifyPinnedLibbox by tasks.registering {
     inputs.files(libboxAar, libboxMetadata)
     inputs.property("expectedCoreTag", coreTag)
     inputs.property("expectedCoreCommit", coreCommit)
+    inputs.property("expectedCorePatchFile", corePatchFile)
+    inputs.property("expectedCorePatchSha256", corePatchSha256)
     doLast {
         val aar = inputs.files.single { it.name == "libbox.aar" }
         val metadataFile = inputs.files.single { it.name == "libbox.properties" }
@@ -195,6 +200,12 @@ val verifyPinnedLibbox by tasks.registering {
         }
         check(metadata.getProperty("CORE_COMMIT") == inputs.properties["expectedCoreCommit"]) {
             "libbox commit does not match core.properties. Rebuild the core."
+        }
+        check(metadata.getProperty("CORE_PATCH_FILE") == inputs.properties["expectedCorePatchFile"]) {
+            "libbox patch file does not match core.properties. Rebuild the core."
+        }
+        check(metadata.getProperty("CORE_PATCH_SHA256") == inputs.properties["expectedCorePatchSha256"]) {
+            "libbox patch hash does not match core.properties. Rebuild the core."
         }
 
         val digest = MessageDigest.getInstance("SHA-256")

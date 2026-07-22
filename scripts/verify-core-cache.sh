@@ -10,7 +10,7 @@ LIBS_DIR="$PROJECT_ROOT/app/libs"
 LIBBOX_AAR="$LIBS_DIR/libbox.aar"
 LIBBOX_PROPERTIES="$LIBS_DIR/libbox.properties"
 
-for command in cmp jq sha256sum unzip; do
+for command in cmp jq sha256sum strings unzip; do
     command -v "$command" >/dev/null || {
         echo "Missing required command: $command" >&2
         exit 1
@@ -48,6 +48,10 @@ cmp -s "$LIBBOX_AAR" "$OUTPUT_DIR/libbox.aar" || {
 
 grep -Fqx "CORE_TAG=$CORE_TAG" "$LIBBOX_PROPERTIES"
 grep -Fqx "CORE_COMMIT=$CORE_COMMIT" "$LIBBOX_PROPERTIES"
+grep -Fqx "CORE_PATCH_FILE=$CORE_PATCH_FILE" "$LIBBOX_PROPERTIES"
+grep -Fqx "CORE_PATCH_SHA256=$CORE_PATCH_SHA256" "$LIBBOX_PROPERTIES"
+source "$PROJECT_ROOT/scripts/core-patchset.sh"
+verify_core_patchset "$PROJECT_ROOT"
 EXPECTED_LIBBOX_SHA256="$(sed -n 's/^LIBBOX_SHA256=//p' "$LIBBOX_PROPERTIES")"
 if [[ ! "$EXPECTED_LIBBOX_SHA256" =~ ^[0-9a-f]{64}$ ]] ||
     [[ "$EXPECTED_LIBBOX_SHA256" != "$(sha256sum "$LIBBOX_AAR" | awk '{print $1}')" ]]; then
@@ -59,12 +63,16 @@ jq -e \
     --arg repository "$CORE_REPOSITORY" \
     --arg tag "$CORE_TAG" \
     --arg commit "$CORE_COMMIT" \
+    --arg patch_file "$CORE_PATCH_FILE" \
+    --arg patch_sha256 "$CORE_PATCH_SHA256" \
     --arg go "$GO_VERSION" \
     --arg gomobile "$GOMOBILE_VERSION" \
     --arg ndk "$ANDROID_NDK_VERSION" \
     '.repository == $repository and
      .tag == $tag and
      .commit == $commit and
+     .patch_file == $patch_file and
+     .patch_sha256 == $patch_sha256 and
      .go == $go and
      .gomobile == $gomobile and
      .android_ndk == $ndk and
@@ -72,6 +80,18 @@ jq -e \
     "$OUTPUT_DIR/core-build-metadata.json" >/dev/null
 
 unzip -tq "$OUTPUT_DIR/libbox.aar" >/dev/null
+for abi in arm64-v8a armeabi-v7a x86_64; do
+    marker="$(
+        unzip -p "$OUTPUT_DIR/libbox.aar" "jni/$abi/libbox.so" \
+            | strings \
+            | grep -F 'DisableSomeRoamingForBrokenMobileSemantics' \
+            || true
+    )"
+    if [[ -z "$marker" ]]; then
+            echo "Android WireGuard roaming patch marker is missing for $abi" >&2
+            exit 1
+    fi
+done
 mapfile -t LIBBOX_NATIVE_ENTRIES < <(
     unzip -Z1 "$OUTPUT_DIR/libbox.aar" \
         | grep -E '^jni/[^/]+/libbox\.so$' \
@@ -102,10 +122,12 @@ SYMBOL_NATIVE_SHA256="$(
 SYMBOL_ARCHIVE_SHA256="$(sha256sum "$OUTPUT_DIR/native-debug-symbols.zip" | awk '{print $1}')"
 jq -e \
     --arg commit "$CORE_COMMIT" \
+    --arg patch_sha256 "$CORE_PATCH_SHA256" \
     --arg production "$PRODUCTION_NATIVE_SHA256" \
     --arg symbols "$SYMBOL_NATIVE_SHA256" \
     --arg archive "$SYMBOL_ARCHIVE_SHA256" \
     '.core_commit == $commit and
+     .core_patch_sha256 == $patch_sha256 and
      .abi == "arm64-v8a" and
      .production_libbox_sha256 == $production and
      .unstripped_libbox_sha256 == $symbols and

@@ -13,6 +13,7 @@ import io.github.zapretkvn.android.vpn.PrivateDnsMode
 import io.github.zapretkvn.android.vpn.UnderlyingNetworkState
 import io.github.zapretkvn.android.vpn.VpnConnectionState
 import io.github.zapretkvn.android.vpn.VpnController
+import io.github.zapretkvn.android.vpn.VpnRuntimeMetrics
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -83,7 +84,7 @@ class DiagnosticExporter(
         val network = readCurrentNetwork(diagnostics.network)
         val now = System.currentTimeMillis()
         val root = buildJsonObject {
-            put("report_version", 2)
+            put("report_version", 3)
             put("created_at", isoTimestamp(now))
             put("created_at_epoch_ms", now)
             put(
@@ -91,6 +92,7 @@ class DiagnosticExporter(
                 buildJsonObject {
                     put("version_name", BuildConfig.VERSION_NAME)
                     put("version_code", BuildConfig.VERSION_CODE)
+                    put("debug", BuildConfig.DEBUG)
                 },
             )
             put(
@@ -98,6 +100,7 @@ class DiagnosticExporter(
                 buildJsonObject {
                     put("tag", BuildConfig.CORE_TAG)
                     put("revision", BuildConfig.CORE_COMMIT)
+                    put("patch_sha256", BuildConfig.CORE_PATCH_SHA256)
                 },
             )
             put(
@@ -105,9 +108,13 @@ class DiagnosticExporter(
                 buildJsonObject {
                     put("release", Build.VERSION.RELEASE.orEmpty())
                     put("api", Build.VERSION.SDK_INT)
+                    put("manufacturer", Build.MANUFACTURER.orEmpty().take(80))
+                    put("model", Build.MODEL.orEmpty().take(80))
+                    put("primary_abi", Build.SUPPORTED_ABIS.firstOrNull().orEmpty())
                 },
             )
             put("vpn", vpnStateJson(vpnController.state.value))
+            put("runtime_resources", runtimeResourcesJson())
             put(
                 "vpn_system_policy",
                 buildJsonObject {
@@ -130,6 +137,13 @@ class DiagnosticExporter(
             )
             put("last_error", failureJson(diagnostics.lastFailure))
             put(
+                "log_stats",
+                buildJsonObject {
+                    put("application", logStatsJson(diagnostics.applicationLogStats, diagnostics.applicationLogs.size))
+                    put("core", logStatsJson(diagnostics.coreLogStats, diagnostics.coreLogs.size))
+                },
+            )
+            put(
                 "connection_attempt",
                 diagnostics.connectionAttempt?.let(::connectionAttemptJson) ?: JsonNull,
             )
@@ -140,6 +154,7 @@ class DiagnosticExporter(
                 },
             )
             put("previous_crash", crashJson(crashStore.read()))
+            put("previous_process_exit", processExitJson(diagnostics.previousProcessExit))
             put(
                 "effective_overlay",
                 diagnostics.effectiveOverlay
@@ -153,7 +168,11 @@ class DiagnosticExporter(
                         add(
                             buildJsonObject {
                                 put("received_at_epoch_ms", line.receivedAtEpochMillis)
+                                put("last_received_at_epoch_ms", line.lastReceivedAtEpochMillis)
                                 put("level", line.levelName)
+                                put("source", line.source.code)
+                                put("category", line.category.code)
+                                put("repeat_count", line.repeatCount)
                                 put("message", line.message)
                             },
                         )
@@ -167,6 +186,8 @@ class DiagnosticExporter(
                     put("credentials_included", false)
                     put("installed_packages_included", false)
                     put("external_ip_included", false)
+                    put("runtime_log_persisted", false)
+                    put("anr_trace_included", false)
                 },
             )
         }
@@ -202,6 +223,19 @@ class DiagnosticExporter(
         )
         if (state is VpnConnectionState.Connected) {
             put("connected_at_epoch_ms", state.connectedAtEpochMillis)
+        }
+    }
+
+    private fun runtimeResourcesJson(): JsonObject {
+        val resources = VpnRuntimeMetrics.snapshot()
+        return buildJsonObject {
+            put("sessions", resources.activeSessions)
+            put("libbox_instances", resources.activeLibboxInstances)
+            put("platform_adapters", resources.activePlatformAdapters)
+            put("tun_descriptors", resources.activeTunDescriptors)
+            put("network_callbacks", resources.activeNetworkCallbacks)
+            put("status_clients", resources.activeStatusClients)
+            put("log_clients", resources.activeLogClients)
         }
     }
 
@@ -255,6 +289,7 @@ class DiagnosticExporter(
                                 put("started_at_epoch_ms", stage.startedAtEpochMillis)
                                 stage.durationMillis?.let { put("duration_ms", it) }
                                 put("status", stage.status.code)
+                                stage.detail?.let { put("detail", it) }
                             },
                         )
                     }
@@ -266,13 +301,29 @@ class DiagnosticExporter(
                     attempt.startupCoreLogs.forEach { add(logLineJson(it)) }
                 },
             )
+            put(
+                "startup_core_log_stats",
+                logStatsJson(attempt.startupCoreLogStats, attempt.startupCoreLogs.size),
+            )
         }
 
     private fun logLineJson(line: DiagnosticLogLine): JsonObject = buildJsonObject {
         put("received_at_epoch_ms", line.receivedAtEpochMillis)
+        put("last_received_at_epoch_ms", line.lastReceivedAtEpochMillis)
         put("level", line.levelName)
+        put("source", line.source.code)
+        put("category", line.category.code)
+        put("repeat_count", line.repeatCount)
         put("message", line.message)
     }
+
+    private fun logStatsJson(stats: DiagnosticLogStats, retainedEntries: Int): JsonObject =
+        buildJsonObject {
+            put("received_lines", stats.receivedLines)
+            put("retained_entries", retainedEntries)
+            put("coalesced_lines", stats.coalescedLines)
+            put("dropped_lines", stats.droppedLines)
+        }
 
     private fun crashJson(crash: AppCrashRecord?): JsonObject = buildJsonObject {
         put("present", crash != null)
@@ -296,6 +347,22 @@ class DiagnosticExporter(
                     }
                 },
             )
+        }
+    }
+
+    private fun processExitJson(exit: AppProcessExitRecord?): JsonObject = buildJsonObject {
+        put("supported", Build.VERSION.SDK_INT >= 30)
+        put("present", exit != null)
+        exit?.let { record ->
+            put("occurred_at_epoch_ms", record.occurredAtEpochMillis)
+            put("reason_code", record.reasonCode)
+            put("reason", record.reason)
+            put("status", record.status)
+            put("importance", record.importance)
+            put("pss_kb", record.pssKilobytes)
+            put("rss_kb", record.rssKilobytes)
+            record.description?.let { put("description", it) }
+            put("trace_included", false)
         }
     }
 

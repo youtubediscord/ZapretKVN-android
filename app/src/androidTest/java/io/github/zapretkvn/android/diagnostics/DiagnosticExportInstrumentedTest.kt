@@ -96,8 +96,9 @@ class DiagnosticExportInstrumentedTest {
 
             val report = exporter.createReport()
             JsonConfig.parse(report)
-            assertTrue("\"report_version\": 2" in report)
+            assertTrue("\"report_version\": 3" in report)
             assertTrue(BuildConfig.CORE_COMMIT in report)
+            assertTrue(BuildConfig.CORE_PATCH_SHA256 in report)
             assertTrue("\"private_dns_mode\"" in report)
             assertTrue("\"vpn_system_policy\"" in report)
             assertTrue("\"supported_by_app\": false" in report)
@@ -105,6 +106,11 @@ class DiagnosticExportInstrumentedTest {
             assertTrue("\"connection_attempt\"" in report)
             assertTrue("\"connection_attempts\"" in report)
             assertTrue("\"startup_core_logs\"" in report)
+            assertTrue("\"startup_core_log_stats\"" in report)
+            assertTrue("\"log_stats\"" in report)
+            assertTrue("\"previous_process_exit\"" in report)
+            assertTrue("\"runtime_resources\"" in report)
+            assertTrue("\"runtime_log_persisted\": false" in report)
             assertTrue("\"support_code\": \"DNS-200\"" in report)
             assertEquals(
                 2,
