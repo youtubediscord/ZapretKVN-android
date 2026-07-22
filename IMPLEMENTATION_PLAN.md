@@ -289,6 +289,7 @@ connect health-check и затем только при видимой диагн
 - [x] `I6-10` Завершить Настройки: тема, DNS, Stable/Beta, Диагностика, Сообщество, О приложении.
 - [x] `I6-10A` Добавить отдельный экран «Скрытие VPN» и rootless runtime-модуль без нового process/thread/polling: localhost endpoints закрыты по умолчанию, stored JSON не меняется.
 - [ ] `I6-10B` Завершить physical gate MTU 1500 на IPv4/IPv6/NAT64/QUIC, операторах, OEM и энергии; initial device-test позволил включить default с явным откатом к profile/core.
+- [ ] `I6-10C` Проверить на физическом Android WireGuard/AWG с раздельными MTU: внешний TUN 1500 и внутренний endpoint 1280 по умолчанию; явный endpoint `mtu` не переопределяется.
 - [x] `I6-11` Разместить Telegram-ссылки только в «Настройки → Сообщество».
 - [x] `I6-12` Добавить accessibility labels, нормальный back navigation, состояния loading/empty/error и крупные touch targets.
 - [x] `I6-13` Ограничить анимации стандартными Compose/Material; не добавлять тяжёлый dashboard.
@@ -524,7 +525,9 @@ arm64 RC и незавершённая физическая матрица из 
   несовместимость хотя бы одного режима.
 - [x] `F-05` MTU 1500 продвинут в default после initial device-test; экран сохраняет явный
   откат к profile/core. Полная физическая матрица IPv4, IPv6/NAT64, QUIC, PMTU, CPU
-  и энергии остаётся в `I6-10B`.
+  и энергии остаётся в `I6-10B`. Это только внешний Android TUN: внутренний
+  WireGuard/AWG endpoint без явного `mtu` получает Android-совместимое значение 1280;
+  его physical gate отслеживается отдельно в `I6-10C`.
 - [ ] `F-06` Patch owner/process lookup. Сначала P4 benchmark текущего core и отдельной
   экспериментальной сборки на реальных устройствах; требуются существенный повторяемый
   выигрыш, собственный patch hash и полный regression/release matrix.

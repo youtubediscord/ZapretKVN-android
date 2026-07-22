@@ -44,7 +44,7 @@ object WireGuardConfigParser {
         }
         val mtu = interfaceValues.single("mtu")?.let {
             parseInt(it, "MTU", 0..65535).takeIf { value -> value != 0 }
-        }
+        } ?: ANDROID_WIREGUARD_MTU
         val dnsServers = interfaceValues.list("dns").map { parseNumericAddress(it, "DNS") }.distinct()
         rejectUnsupportedInterfaceKeys(interfaceValues)
 
@@ -198,7 +198,7 @@ object WireGuardConfigParser {
         addresses: List<String>,
         privateKey: String,
         listenPort: Int?,
-        mtu: Int?,
+        mtu: Int,
         peers: List<WireGuardPeer>,
         amnezia: Map<String, JsonElement>?,
         dnsServers: List<String>,
@@ -238,7 +238,7 @@ object WireGuardConfigParser {
                     add(buildJsonObject {
                         put("type", "wireguard")
                         put("tag", endpointTag)
-                        mtu?.let { put("mtu", it) }
+                        put("mtu", mtu)
                         put("address", JsonArray(addresses.map(::JsonPrimitive)))
                         put("private_key", privateKey)
                         listenPort?.let { put("listen_port", it) }
@@ -582,6 +582,9 @@ object WireGuardConfigParser {
 
     private const val BOOTSTRAP_DNS_TAG = "wireguard-bootstrap-dns"
     private const val IMPORTED_DNS_TAG_PREFIX = "wireguard-dns-"
+    // Official Amnezia uses this conservative default for WireGuard/AWG on Android.
+    // It is the inner WireGuard MTU, independent from the outer Android TUN MTU.
+    private const val ANDROID_WIREGUARD_MTU = 1280
     private const val MAX_AWG_INTEGER = 65_535
     private const val MAX_AWG_STRING_LENGTH = 5 * 1024
     private const val MAX_OBFUSCATION_SIZE = 65_535

@@ -24,6 +24,7 @@ class WireGuardConfigParserTest {
         assertEquals("WireGuard", result.protocolName)
         assertEquals("192.0.2.1:51820", result.endpointLabel)
         assertEquals("wireguard", endpoint.string("type"))
+        assertEquals("1280", endpoint["mtu"].content())
         assertEquals("192.0.2.2/32", (endpoint["address"] as JsonArray).single().content())
         assertEquals(TEST_PRIVATE_KEY, endpoint.string("private_key"))
         assertEquals("192.0.2.1", peer.string("address"))

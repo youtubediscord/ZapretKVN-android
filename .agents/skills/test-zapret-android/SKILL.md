@@ -93,7 +93,7 @@ If `run-as` reports that the package is not debuggable, verify the installed pac
 Before treating an attachment as app evidence, verify that it is JSON and contains the Zapret schema. A Telegram MTP/MTProxy text log renamed to `.json` is not an app diagnostic:
 
 ```bash
-jq -e '.schema_version >= 2 and (.app | type == "object")' zapret-kvn-diagnostic.json
+jq -e '.report_version >= 2 and (.app | type == "object")' zapret-kvn-diagnostic.json
 ```
 
 ## Capture Android network state

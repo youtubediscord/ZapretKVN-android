@@ -27,7 +27,7 @@ class EffectiveOverlaySummaryTest {
                 {"protocol":"dns","action":"hijack-dns"},
                 {"rule_set":["zapret-ru"],"outbound":"zapret-proxy"}
               ],"rule_set":[{"tag":"zapret-ru","type":"local","format":"binary","path":"/secret/geo.srs"}]},
-              "endpoints":[{"type":"wireguard","tag":"zapret-proxy","private_key":"top-secret"}],
+              "endpoints":[{"type":"wireguard","tag":"zapret-proxy","mtu":1280,"private_key":"top-secret"}],
               "outbounds":[{"type":"vless","tag":"server","server":"vpn.example","uuid":"123e4567-e89b-12d3-a456-426614174000","password":"top-secret"}]
             }
         """.trimIndent()
@@ -50,6 +50,11 @@ class EffectiveOverlaySummaryTest {
         assertEquals(
             "wireguard",
             ((summary["proxy_transport_types"] as JsonArray).single() as JsonPrimitive).content,
+        )
+        assertEquals("1", (summary["wireguard_endpoint_count"] as JsonPrimitive).content)
+        assertEquals(
+            "1280",
+            ((summary["wireguard_mtu_values"] as JsonArray).single() as JsonPrimitive).content,
         )
         assertTrue((summary["proxy_ipv4_only"] as JsonPrimitive).boolean)
         assertEquals("2", (summary["route_rule_count"] as JsonPrimitive).content)

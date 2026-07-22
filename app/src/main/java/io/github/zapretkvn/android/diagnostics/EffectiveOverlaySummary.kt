@@ -60,6 +60,10 @@ object EffectiveOverlaySummary {
             .mapNotNull { it.string("type") }
             .map(::safeToken)
             .distinct()
+        val wireGuardEndpoints = (root["endpoints"] as? JsonArray)
+            ?.mapNotNull { it as? JsonObject }
+            .orEmpty()
+            .filter { it.string("type") == "wireguard" }
 
         return JsonConfig.format(
             buildJsonObject {
@@ -103,6 +107,15 @@ object EffectiveOverlaySummary {
                 put(
                     "proxy_transport_types",
                     JsonArray(proxyTransportTypes.map(::JsonPrimitive)),
+                )
+                put("wireguard_endpoint_count", wireGuardEndpoints.size)
+                put(
+                    "wireguard_mtu_values",
+                    JsonArray(
+                        wireGuardEndpoints.mapNotNull { endpoint ->
+                            endpoint.string("mtu")?.toIntOrNull()
+                        }.distinct().map(::JsonPrimitive),
+                    ),
                 )
                 put("route_rule_count", managedRouteRules.size)
                 put(

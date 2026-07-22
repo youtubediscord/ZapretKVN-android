@@ -47,10 +47,11 @@ object RuntimeConfigBuilder {
         } catch (_: Exception) {
             return invalid("JSON содержит синтаксическую ошибку.")
         }
-        val root = when (val hardened = VpnRuntimeHardening.apply(storedRoot, options.vpnHiding)) {
+        val hardenedRoot = when (val hardened = VpnRuntimeHardening.apply(storedRoot, options.vpnHiding)) {
             is RuntimeHardeningResult.Ready -> hardened.root
             is RuntimeHardeningResult.Blocked -> return invalid(hardened.message)
         }
+        val root = applyAndroidWireGuardDefaults(hardenedRoot)
 
         findForbiddenField(root)?.let { field ->
             return invalid("Поле '$field' несовместимо с Android VPN и запрещено в MVP.")
@@ -151,6 +152,30 @@ object RuntimeConfigBuilder {
         if (dnsOverlay is RuntimeConfigResult.Invalid) return dnsOverlay
         val runtime = (dnsOverlay as RuntimeConfigResult.Ready).json
         return RuntimeConfigResult.Ready(runtime)
+    }
+
+    /**
+     * The outer Android TUN and the inner userspace WireGuard endpoint have separate MTUs.
+     * Amnezia uses 1280 for WireGuard/AWG on Android, while sing-box defaults the inner
+     * endpoint to 1408. Apply the Android value only when the profile did not choose one;
+     * the stored JSON remains unchanged.
+     */
+    private fun applyAndroidWireGuardDefaults(root: JsonObject): JsonObject {
+        val endpoints = root["endpoints"] as? JsonArray ?: return root
+        var changed = false
+        val runtimeEndpoints = JsonArray(endpoints.map { element ->
+            val endpoint = element as? JsonObject
+            if (endpoint?.string("type") == "wireguard" && "mtu" !in endpoint) {
+                changed = true
+                JsonObject(endpoint.toMutableMap().apply {
+                    this["mtu"] = JsonPrimitive(ANDROID_WIREGUARD_MTU)
+                })
+            } else {
+                element
+            }
+        })
+        if (!changed) return root
+        return JsonObject(root.toMutableMap().apply { this["endpoints"] = runtimeEndpoints })
     }
 
     private fun applyDnsOverlay(
@@ -546,6 +571,7 @@ object RuntimeConfigBuilder {
     private val MANAGED_DNS_MODES = setOf(DnsMode.Automatic, DnsMode.Android, DnsMode.Secure)
     private val PROXY_DNS_MODES = setOf(DnsMode.Automatic, DnsMode.Secure)
     private const val ANDROID_DNS_TAG = "zapret-android-dns"
+    private const val ANDROID_WIREGUARD_MTU = 1280
     private const val DOH_1_TAG = "zapret-doh-1"
     private const val DOH_2_TAG = "zapret-doh-2"
     private const val SECURE_DNS_TAG = "zapret-secure-dns"

@@ -64,6 +64,28 @@ class RuntimeConfigBuilderTest {
     }
 
     @Test
+    fun `wireguard gets Android inner mtu without changing stored or explicit value`() {
+        val stored = validConfig(
+            rootExtra = """
+                ,"endpoints":[
+                  {"type":"wireguard","tag":"wg-default"},
+                  {"type":"wireguard","tag":"wg-explicit","mtu":1376},
+                  {"type":"other","tag":"untouched"}
+                ]
+            """.trimIndent(),
+        )
+
+        val result = RuntimeConfigBuilder.build(stored) as RuntimeConfigResult.Ready
+        val endpoints = ((JsonConfig.parse(result.json) as JsonObject)["endpoints"] as JsonArray)
+            .map { it as JsonObject }
+
+        assertEquals("1280", (endpoints[0]["mtu"] as JsonPrimitive).content)
+        assertEquals("1376", (endpoints[1]["mtu"] as JsonPrimitive).content)
+        assertFalse("mtu" in endpoints[2])
+        assertFalse("stored profile must stay untouched", "1280" in stored)
+    }
+
+    @Test
     fun `runtime copy owns logging packages and managed interrupt without mutating source`() {
         val stored = validConfig(
             tunExtra = """
