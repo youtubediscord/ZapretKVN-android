@@ -236,7 +236,7 @@ private fun SettingsMain(
                     Column(modifier = Modifier.weight(1f)) {
                         Text("Только IPv4 через VPN")
                         Text(
-                            "Включено по умолчанию. Убирает AAAA только из managed DoH через proxy; выключите для IPv6-only сайтов. LAN, прямой DNS и режим «Из JSON» не меняются.",
+                            "Включено по умолчанию. Убирает AAAA для доменов, которые пойдут через proxy, включая режим «DNS Android»; выключите для IPv6-only сайтов. LAN, прямые домены и режим «Из JSON» не меняются.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -244,8 +244,7 @@ private fun SettingsMain(
                     Switch(
                         checked = state.settings.proxyIpv4Only,
                         onCheckedChange = viewModel::setProxyIpv4Only,
-                        enabled = state.settings.dnsMode == DnsMode.Automatic ||
-                            state.settings.dnsMode == DnsMode.Secure,
+                        enabled = state.settings.dnsMode != DnsMode.FromJson,
                         modifier = Modifier.semantics {
                             contentDescription = "Только IPv4 через VPN"
                         },

@@ -26,7 +26,7 @@
 - [x] Принята архитектура с одним product-модулем `app` и узкими направленными libraries (`network-bootstrap`, import), без Room, Hilt, WebView и WorkManager.
 - [x] Разделены Android per-app scope и sing-box destination routing.
 - [x] Зафиксированы один process, один `VpnService`, один TUN и один libbox instance.
-- [x] Зафиксирована DNS-архитектура без FakeIP и с managed `fallback/sequential`.
+- [x] Зафиксирована DNS-архитектура без FakeIP и с managed `fallback/parallel`.
 - [x] Зафиксирована маршрутизация `proxy` / `direct` / `reject` через настоящий JSON.
 - [x] Зафиксирован точный commit ядра.
 - [x] Подготовлены и проверены 6/6 эталонных JSON.
@@ -158,13 +158,13 @@ MVP готов только когда выполнены все пункты:
 - [x] `I3-03` Реализовать маленький LKG cache адреса proxy: fresh 24 часа, аварийный срок до 7 дней, исходное имя сохранять для TLS/Reality SNI.
 - [x] `I3-04` Детектировать Private DNS off/automatic/strict через `LinkProperties`; системную настройку никогда не менять.
 - [x] `I3-05` Реализовать четыре режима GUI: Автоматически, DNS Android, Защищённый через VPN, Из JSON.
-- [x] `I3-05A` Добавить включённый по умолчанию «Только IPv4 через VPN»: `ipv4_only` применяется только к generated secure DNS rules, не меняя direct/LAN, TUN IPv6 и режим «Из JSON»; пользователь может вернуть dual-stack для IPv6-only сайта.
+- [x] `I3-05A` Добавить включённый по умолчанию «Только IPv4 через VPN»: `ipv4_only` применяется к generated DNS rules proxy-доменов в Auto/Secure/Android DNS, не меняя direct/LAN, TUN IPv6 и режим «Из JSON»; пользователь может вернуть dual-stack, но WireGuard требует настоящий внутренний IPv6-адрес.
 - [x] `I3-06` Создать `RuntimeConfigBuilder`, который добавляет только `zapret-*` overlays и не меняет сохранённый JSON.
-- [x] `I3-07` В managed Auto/Secure использовать реальные IP, `reverse_mapping`, cache 4096 и DoH `fallback/sequential`; FakeIP не создавать.
+- [x] `I3-07` В managed Auto/Secure использовать реальные IP, `reverse_mapping`, cache 4096 и DoH `fallback/parallel`; exact `sequential` не достигает резерва при зависшем основном DoH; FakeIP не создавать.
 - [x] `I3-08` Брать внутренний DNS через `TunOptions.GetDNSServerAddress()` и передавать его в `VpnService.Builder.addDnsServer()`.
 - [x] `I3-09` Перехватывать стандартный DNS правилом port 53 / `hijack-dns`; не обещать перехват DoT, встроенного DoH и mDNS.
 - [x] `I3-10` При strict Private DNS блокировать managed Auto/Secure до `establish()`; DNS Android разрешать только при active+validated strict, иначе fail-close без plaintext fallback; «Из JSON» не переписывать.
-- [x] `I3-11` Реализовать последовательный health pipeline: proxy socket, DNS через TUN, один HTTPS probe.
+- [x] `I3-11` Реализовать последовательный health pipeline: proxy socket, DNS через TUN, основной HTTPS probe и ровно один резервный endpoint только после ошибки.
 - [x] `I3-12` Показывать «Подключено» только после всех проверок; любая ошибка закрывает TUN.
 - [x] `I3-13` При смене сети или DNS/captive policy state обновлять underlying Network, сбрасывать transport и выполнять один контролируемый restart с debounce/generation token.
 - [x] `I3-14` Не добавлять периодический health-check, бесконечный retry или plaintext DNS fallback.
@@ -175,7 +175,7 @@ MVP готов только когда выполнены все пункты:
 
 ### Тесты и Gate 3
 
-- [x] Unit/core: четыре DNS fixtures проходят exact CLI; JVM-тест подтверждает managed `fallback/sequential` без FakeIP.
+- [x] Unit/core: четыре DNS fixtures проходят exact CLI; JVM-тест подтверждает managed `fallback/parallel` без FakeIP.
 - [x] Core: воспроизводимый тест внутри exact pinned package проверяет success, transport error, hang с общим context и `NXDOMAIN`/`SERVFAIL`/`REFUSED` без ошибочного fallback.
 - [x] Instrumented на AVD API 28/29/36: Private DNS off/automatic/strict working/strict broken; managed Auto/Secure блокируются до TUN, а поломка strict Android DNS во время активной сессии event-driven закрывает TUN без plaintext fallback.
 - [x] Instrumented на AVD: реальные Wi-Fi, mobile, Wi-Fi ↔ mobile и IPv6; один контролируемый restart на каждую смену; captive-portal fail-close покрыт детерминированной fault injection до TUN.
@@ -184,6 +184,14 @@ MVP готов только когда выполнены все пункты:
 - [ ] Physical lab: повторить blocked system DNS/LKG и DoH failure на реальной Wi-Fi/mobile сети, а не только через детерминированную fault injection.
 - [x] Instrumented: мёртвый внутренний DNS после TUN закрывает core/PFD; Android немедленно получает обычную non-VPN сеть и снова разрешает DNS.
 - [ ] Gate: вся матрица DNS ADR проходит, активный TUN никогда не остаётся с неработающим DNS.
+
+Physical Test 17 на Pixel 9 Pro XL (API 37) подтвердил ответ WireGuard handshake и
+чистый fail-close без утечки PFD/core/callback. Он одновременно выявил три независимые
+ошибки после handshake: `ipv4_only` не применялся к proxy-доменам режима DNS Android;
+`fallback/sequential` не мог перейти к резервному DoH после зависания первого; одиночный
+Google 204 probe давал ложный `VPN-200`, а IPv6-попытка WireGuard-профиля без внутреннего
+IPv6 завершалась `missing IPv6 local address`. Runtime и ADR исправлены; physical
+подтверждение Test 18 остаётся частью открытого Gate 3.
 
 ## Этап 4 — маршрутизация и rule-set
 
@@ -469,7 +477,7 @@ Gate остаётся внешним до первого фактически о
 - [ ] `R8-12` Невыбранное приложение передаёт фиксированный объём без пропорционального CPU/network роста Zapret KVN. На AVD 8 MiB дали median TUN=0; физический OEM-повтор открыт.
 - [ ] `R8-13` Сравнить выбранный `direct` и `proxy`: CPU, throughput, RSS/PSS, GC и энергия. AVD CPU/throughput/RSS/PSS готовы; реальные proxy, GC trace и энергия открыты.
 - [ ] `R8-14` Сравнить главную видимую/закрытую и diagnostics открыта/закрыта. Настоящие Compose-экраны AVD измерены; физическая энергия открыта.
-- [ ] `R8-15` Сравнить managed DNS `sequential` с контрольным `parallel` на уникальных именах. AVD 5×12 готов; физическая энергия/сети открыты.
+- [ ] `R8-15` Измерить принятый managed `parallel` против контрольного `sequential` на уникальных именах. Test 17 уже доказал функциональную регрессию `sequential` при hang; AVD 5×12 готов, физическая энергия/cache burst открыты.
 - [ ] `R8-16` Сравнить текущий `mixed` stack с `system`; AVD-разница ниже 5%, default не изменён; физическая матрица открыта.
 - [ ] `R8-17` Сравнить default MTU 1500 и profile/core; initial physical test дал заметный выигрыш, но IPv6/NAT64/QUIC, оператор/OEM и энергия открыты.
 - [ ] `R8-18` Сравнить `SetMemoryLimit(false)` с экспериментальным GC=10: AVD CPU/PSS/RSS/throughput ниже порога; Go GC count/pause, OOM и физическая энергия открыты.
@@ -569,8 +577,9 @@ arm64 RC и незавершённая физическая матрица из 
 - [x] Routing lookup/cold-start CPU/RAM measurements выполнены на AVD API 26/36 и exact core benchmark.
 - [ ] Idle CPU/battery release-gate выполнен на физических устройствах.
 
-**Следующее действие:** синхронизироваться с remote commit `4f8f7bb`, опубликовать второй commit
-без force push и дождаться зелёного CI. После этого установить новый debug APK, один раз воспроизвести
-медленное подключение и сразу экспортировать diagnostic report v2. Затем закрыть причину задержки,
-физическую матрицу этапа 8 (captive portal, IPv6-only/NAT64, камера/HTTPS subscription,
-blocked-DNS/LKG/DoH, OEM per-app/routing и энергия), после чего создать production signing key по `SIGNING.md`.
+**Следующее действие:** опубликовать Test 18 и на том же WireGuard-профиле проверить
+Auto и DNS Android с включённым «Только IPv4 через VPN»; «Из JSON» проверить отдельно
+как неизменённую пользовательскую DNS-политику. После успешного подключения повторить
+смену Wi‑Fi/mobile и длительную сессию; затем остаются физическая
+матрица этапа 8 (captive portal, IPv6-only/NAT64, камера/HTTPS subscription,
+blocked-DNS/LKG/DoH, OEM per-app/routing и энергия) и production signing key по `SIGNING.md`.

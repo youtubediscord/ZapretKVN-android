@@ -19,6 +19,29 @@ enum class DnsMode {
     FromJson,
 }
 
+internal data class ManagedHealthEndpoint(
+    val code: String,
+    val host: String,
+    val url: String,
+)
+
+/** One HTTPS request is made on connect; the second endpoint is used only after a real failure. */
+internal object ManagedHealthProbe {
+    val endpoints = listOf(
+        ManagedHealthEndpoint(
+            code = "cloudflare",
+            host = "cp.cloudflare.com",
+            url = "https://cp.cloudflare.com/generate_204",
+        ),
+        ManagedHealthEndpoint(
+            code = "google",
+            host = "connectivitycheck.gstatic.com",
+            url = "https://connectivitycheck.gstatic.com/generate_204",
+        ),
+    )
+    val hosts = endpoints.map(ManagedHealthEndpoint::host)
+}
+
 data class RuntimeConfigOptions(
     val dnsMode: DnsMode = DnsMode.FromJson,
     val proxyIpv4Only: Boolean = true,
@@ -245,7 +268,11 @@ object RuntimeConfigBuilder {
             val rejectRules = existingRules.filter(::isRejectRule)
             val otherRules = existingRules.filterNot(::isRejectRule)
             val generated = when (mode) {
-                DnsMode.Android -> listOf(catchAllDnsRule(ANDROID_DNS_TAG))
+                DnsMode.Android -> androidDnsRules(
+                    root,
+                    selectedProxyTag,
+                    proxyIpv4Only,
+                )
                 DnsMode.Secure -> listOf(
                     catchAllDnsRule(SECURE_DNS_TAG, ipv4Only = proxyIpv4Only),
                 )
@@ -313,7 +340,9 @@ object RuntimeConfigBuilder {
             put("type", "fallback")
             put("tag", SECURE_DNS_TAG)
             put("servers", JsonArray(listOf(JsonPrimitive(DOH_1_TAG), JsonPrimitive(DOH_2_TAG))))
-            put("strategy", "sequential")
+            // A sequential transport cannot advance when the first DoH hangs until the
+            // caller deadline. Parallel is the smallest reliable bounded fallback.
+            put("strategy", "parallel")
         },
     )
 
@@ -378,6 +407,47 @@ object RuntimeConfigBuilder {
         return result
     }
 
+    private fun androidDnsRules(
+        root: JsonObject,
+        selectedProxyTag: String?,
+        proxyIpv4Only: Boolean,
+    ): List<JsonElement> {
+        if (!proxyIpv4Only || selectedProxyTag == null) {
+            return listOf(catchAllDnsRule(ANDROID_DNS_TAG))
+        }
+        val result = mutableListOf<JsonElement>()
+        result += buildJsonObject {
+            put(
+                "domain",
+                JsonArray(ManagedHealthProbe.hosts.map(::JsonPrimitive)),
+            )
+            put("action", "route")
+            put("server", ANDROID_DNS_TAG)
+            put("strategy", IPV4_ONLY_STRATEGY)
+        }
+        val routeRules = ((root["route"] as? JsonObject)?.get("rules") as? JsonArray).orEmpty()
+        routeRules.mapNotNullTo(result) { element ->
+            val rule = element as? JsonObject ?: return@mapNotNullTo null
+            if (rule.string("action") != "route") return@mapNotNullTo null
+            val outbound = rule.string("outbound") ?: return@mapNotNullTo null
+            if (outbound != selectedProxyTag && outbound != "direct") return@mapNotNullTo null
+            val match = domainMatchForDns(root, rule)
+            if (match.isEmpty()) return@mapNotNullTo null
+            JsonObject(
+                match + buildMap {
+                    put("action", JsonPrimitive("route"))
+                    put("server", JsonPrimitive(ANDROID_DNS_TAG))
+                    if (outbound == selectedProxyTag) {
+                        put("strategy", JsonPrimitive(IPV4_ONLY_STRATEGY))
+                    }
+                },
+            )
+        }
+        val proxyFinal = automaticFinal(root, selectedProxyTag) == SECURE_DNS_TAG
+        result += catchAllDnsRule(ANDROID_DNS_TAG, ipv4Only = proxyFinal)
+        return result
+    }
+
     private fun domainMatchForDns(root: JsonObject, rule: JsonObject): Map<String, JsonElement> {
         val match = rule.filterKeys(DOMAIN_MATCH_FIELDS::contains).toMutableMap()
         if (rule["ip_version"] != null) {
@@ -435,7 +505,10 @@ object RuntimeConfigBuilder {
     }
 
     private fun healthProbeRule(proxyTag: String): JsonObject = buildJsonObject {
-        put("domain", JsonArray(listOf(JsonPrimitive(HEALTH_PROBE_HOST))))
+        put(
+            "domain",
+            JsonArray(ManagedHealthProbe.hosts.map(::JsonPrimitive)),
+        )
         put("action", "route")
         put("outbound", proxyTag)
     }
@@ -455,7 +528,7 @@ object RuntimeConfigBuilder {
             || rule.string("action") == "route" &&
             rule.string("outbound")?.startsWith("zapret-") == true &&
             (rule["domain"] as? JsonArray)?.any {
-                (it as? JsonPrimitive)?.contentOrNull == HEALTH_PROBE_HOST
+                (it as? JsonPrimitive)?.contentOrNull in ManagedHealthProbe.hosts
             } == true
     }
 
@@ -616,7 +689,6 @@ object RuntimeConfigBuilder {
     private const val DOH_2_TAG = "zapret-doh-2"
     private const val SECURE_DNS_TAG = "zapret-secure-dns"
     private const val BOOTSTRAP_DNS_TAG = "zapret-bootstrap-lkg"
-    private const val HEALTH_PROBE_HOST = "connectivitycheck.gstatic.com"
     private const val IPV4_ONLY_STRATEGY = "ipv4_only"
     private val GENERATED_DNS_SERVER_TAGS = setOf(
         ANDROID_DNS_TAG,

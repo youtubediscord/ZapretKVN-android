@@ -4,6 +4,8 @@ import android.net.Network
 import io.github.zapretkvn.android.config.BootstrapConfig
 import io.github.zapretkvn.android.config.BootstrapHostOverlay
 import io.github.zapretkvn.android.config.DnsMode
+import io.github.zapretkvn.android.config.ManagedHealthEndpoint
+import io.github.zapretkvn.android.config.ManagedHealthProbe
 import io.github.zapretkvn.android.config.ProxyBootstrapTarget
 import java.io.DataInputStream
 import java.io.DataOutputStream
@@ -202,11 +204,19 @@ class VpnHealthPipeline(
                 error("DNS через VPN не отвечает: тестовый внутренний DNS недоступен.")
             }
             if (mode == DnsMode.Automatic || mode == DnsMode.Secure) {
-                rawDnsProbe(internalDnsServer, HEALTH_HOST, onStageStarted, onStageFinished)
+                rawDnsProbe(
+                    internalDnsServer,
+                    ManagedHealthProbe.endpoints.first().host,
+                    onStageStarted,
+                    onStageFinished,
+                )
             } else {
                 onStageStarted(VpnHealthStage.DnsAndroidProbe)
                 try {
-                    val addresses = resolver.resolve(vpnNetwork, HEALTH_HOST)
+                    val addresses = resolver.resolve(
+                        vpnNetwork,
+                        ManagedHealthProbe.endpoints.first().host,
+                    )
                     onStageFinished(
                         VpnHealthStage.DnsAndroidProbe,
                         VpnHealthStageOutcome.Success,
@@ -234,17 +244,17 @@ class VpnHealthPipeline(
                 error("HTTPS-проверка через VPN не прошла: тестовый endpoint недоступен.")
             }
             try {
-                val status = httpsProbe(vpnNetwork)
+                val result = httpsProbe(vpnNetwork)
                 onStageFinished(
                     VpnHealthStage.HttpsProbe,
                     VpnHealthStageOutcome.Success,
-                    "status=$status",
+                    "endpoint=${result.endpoint.code} status=${result.status}",
                 )
             } catch (error: Throwable) {
                 onStageFinished(
                     VpnHealthStage.HttpsProbe,
                     VpnHealthStageOutcome.Failed,
-                    rootCauseName(error),
+                    (error as? HttpsProbeFailure)?.diagnosticDetail ?: rootCauseName(error),
                 )
                 throw error
             }
@@ -364,25 +374,39 @@ class VpnHealthPipeline(
         return flags and 0x000f
     }
 
-    private suspend fun httpsProbe(vpnNetwork: Network): Int = withContext(Dispatchers.IO) {
-        val connection = vpnNetwork.openConnection(URL(HEALTH_URL)) as HttpsURLConnection
+    private suspend fun httpsProbe(vpnNetwork: Network): HttpsProbeResult = withContext(Dispatchers.IO) {
+        val failures = mutableListOf<String>()
+        var lastError: Throwable? = null
+        for (endpoint in ManagedHealthProbe.endpoints) {
+            try {
+                return@withContext HttpsProbeResult(endpoint, httpsProbeOne(vpnNetwork, endpoint))
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Throwable) {
+                lastError = error
+                failures += "${endpoint.code}:${httpsFailureReason(error)}"
+            }
+        }
+        val detail = failures.joinToString("; ").take(MAX_HTTPS_FAILURE_DETAIL_CHARS)
+        throw HttpsProbeFailure(
+            diagnosticDetail = detail,
+            message = "HTTPS-проверка через VPN не прошла: $detail.",
+            cause = lastError,
+        )
+    }
+
+    private fun httpsProbeOne(vpnNetwork: Network, endpoint: ManagedHealthEndpoint): Int {
+        val connection = vpnNetwork.openConnection(URL(endpoint.url)) as HttpsURLConnection
         try {
-            connection.connectTimeout = HTTPS_TIMEOUT_MILLIS
-            connection.readTimeout = HTTPS_TIMEOUT_MILLIS
+            connection.connectTimeout = HTTPS_ENDPOINT_TIMEOUT_MILLIS
+            connection.readTimeout = HTTPS_ENDPOINT_TIMEOUT_MILLIS
             connection.instanceFollowRedirects = false
             connection.useCaches = false
             connection.setRequestProperty("Connection", "close")
             connection.requestMethod = "GET"
             val status = connection.responseCode
-            if (status != 204) throw UnexpectedHttpsStatus(status)
-            status
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (error: Throwable) {
-            throw IllegalStateException(
-                "HTTPS-проверка через VPN не прошла: ${httpsFailureReason(error)}.",
-                error,
-            )
+            if (status !in HTTP_REACHABLE_STATUS_RANGE) throw UnexpectedHttpsStatus(status)
+            return status
         } finally {
             connection.disconnect()
         }
@@ -391,8 +415,8 @@ class VpnHealthPipeline(
     private fun httpsFailureReason(error: Throwable): String {
         val cause = generateSequence(error) { it.cause }.last()
         return when (cause) {
-            is UnexpectedHttpsStatus -> "тестовый узел вернул HTTP ${cause.status} вместо 204"
-            is SocketTimeoutException -> "истёк тайм-аут ${HTTPS_TIMEOUT_MILLIS} мс"
+            is UnexpectedHttpsStatus -> "тестовый узел вернул некорректный HTTP ${cause.status}"
+            is SocketTimeoutException -> "истёк тайм-аут ${HTTPS_ENDPOINT_TIMEOUT_MILLIS} мс"
             is UnknownHostException -> "Android не разрешил имя тестового узла"
             is ConnectException -> "TCP-соединение с тестовым узлом не установлено"
             is SSLException -> "ошибка TLS (${cause.javaClass.simpleName})"
@@ -407,6 +431,17 @@ class VpnHealthPipeline(
             .javaClass
             .simpleName
             .take(80)
+
+    private data class HttpsProbeResult(
+        val endpoint: ManagedHealthEndpoint,
+        val status: Int,
+    )
+
+    private class HttpsProbeFailure(
+        val diagnosticDetail: String,
+        message: String,
+        cause: Throwable?,
+    ) : IOException(message, cause)
 
     private class UnexpectedHttpsStatus(val status: Int) : IOException()
 
@@ -436,11 +471,11 @@ class VpnHealthPipeline(
     }
 
     private companion object {
-        const val HEALTH_HOST = "connectivitycheck.gstatic.com"
-        const val HEALTH_URL = "https://connectivitycheck.gstatic.com/generate_204"
-        const val HEALTH_TIMEOUT_MILLIS = 10_000L
+        const val HEALTH_TIMEOUT_MILLIS = 15_000L
         const val DNS_TIMEOUT_MILLIS = 2_500
-        const val HTTPS_TIMEOUT_MILLIS = 5_000
+        const val HTTPS_ENDPOINT_TIMEOUT_MILLIS = 4_000
+        const val MAX_HTTPS_FAILURE_DETAIL_CHARS = 240
         const val MAX_DNS_PACKET = 65_535
+        val HTTP_REACHABLE_STATUS_RANGE = 200..599
     }
 }

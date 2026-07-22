@@ -32,7 +32,7 @@
           "zapret-doh-1",
           "zapret-doh-2"
         ],
-        "strategy": "sequential"
+        "strategy": "parallel"
       }
     ],
     "rules": [
