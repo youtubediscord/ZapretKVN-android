@@ -1,0 +1,6 @@
+3f7a35a99eba96983bd85a7b30ee3e16982812265a0b5280f41dc129f67e0f0f  dns/android-dns.json
+091db4ad6b96dad11e2cedfbaed792f1baffdce9c0fbe1f639226480a6e65361  dns/auto-direct-final.json
+1dd3c22737249c39baec07f9f3d31b51c2c65962c2bf1900bbe4174e88b6a279  dns/auto-proxy-final.json
+c0df41216c1eba5f11163bdc724c1458feec18392311d685b87c337fb37fa747  dns/lkg-hosts.json
+d19bb2ede90a327c699544d76757f6a2fbee9ceb55570c8330ac2acfe12a1f3b  routing/block-rule.json
+cad0494627f4776eda70da316bd9caea6105007cc39717923ab6a7062aa6fc96  routing/ru-rule-set.json

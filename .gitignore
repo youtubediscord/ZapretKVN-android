@@ -1,0 +1,28 @@
+*.iml
+.gradle/
+.idea/
+.kotlin/
+local.properties
+**/build/
+build/
+captures/
+.externalNativeBuild/
+.cxx/
+*.jks
+*.keystore
+keystore.properties
+signing.properties
+
+# Generated core artifacts
+app/libs/*.aar
+app/libs/libbox.properties
+app/src/main/jniLibs/
+core-build/
+
+# Local diagnostics and release files
+*.apk
+*.aab
+*.apks
+*.log
+*.prof
+*.trace

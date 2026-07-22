@@ -1,0 +1,801 @@
+package io.github.zapretkvn.android.ui
+
+import android.content.ActivityNotFoundException
+import android.content.Intent
+import android.os.Build
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.ElevatedCard
+import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.unit.dp
+import androidx.core.net.toUri
+import io.github.zapretkvn.android.BuildConfig
+import io.github.zapretkvn.android.config.DnsMode
+import io.github.zapretkvn.android.diagnostics.DiagnosticState
+import io.github.zapretkvn.android.profiles.ProfilesUiState
+import io.github.zapretkvn.android.profiles.ProfilesViewModel
+import io.github.zapretkvn.android.updates.UpdateState
+import io.github.zapretkvn.android.vpn.VpnConnectionState
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
+
+private enum class SettingsDestination {
+    Main,
+    Diagnostics,
+    Community,
+    About,
+}
+
+@Composable
+fun SettingsScreen(
+    contentPadding: PaddingValues,
+    state: ProfilesUiState,
+    vpnState: VpnConnectionState,
+    diagnostics: DiagnosticState,
+    viewModel: ProfilesViewModel,
+    onDiagnosticsSelected: (Boolean) -> Unit,
+    onCreateDiagnosticShare: suspend () -> Intent,
+    onClearDnsCache: () -> Unit,
+    updateState: UpdateState,
+    onCheckUpdate: (UpdateChannel) -> Unit,
+    onDownloadUpdate: () -> Unit,
+    onInstallUpdate: () -> Unit,
+    onCancelUpdate: () -> Unit,
+) {
+    var destination by rememberSaveable { mutableStateOf(SettingsDestination.Main) }
+    val goBack = { destination = SettingsDestination.Main }
+    BackHandler(enabled = destination != SettingsDestination.Main, onBack = goBack)
+
+    when (destination) {
+        SettingsDestination.Main -> SettingsMain(
+            contentPadding = contentPadding,
+            state = state,
+            viewModel = viewModel,
+            onClearDnsCache = onClearDnsCache,
+            updateState = updateState,
+            onCheckUpdate = onCheckUpdate,
+            onDownloadUpdate = onDownloadUpdate,
+            onInstallUpdate = onInstallUpdate,
+            onCancelUpdate = onCancelUpdate,
+            onOpen = { destination = it },
+        )
+        SettingsDestination.Diagnostics -> DiagnosticsSettings(
+            contentPadding = contentPadding,
+            vpnState = vpnState,
+            diagnostics = diagnostics,
+            onSelected = onDiagnosticsSelected,
+            onCreateDiagnosticShare = onCreateDiagnosticShare,
+            onClearDnsCache = onClearDnsCache,
+            onBack = goBack,
+        )
+        SettingsDestination.Community -> CommunitySettings(
+            contentPadding = contentPadding,
+            onBack = goBack,
+        )
+        SettingsDestination.About -> AboutSettings(
+            contentPadding = contentPadding,
+            onBack = goBack,
+        )
+    }
+}
+
+@Composable
+private fun SettingsMain(
+    contentPadding: PaddingValues,
+    state: ProfilesUiState,
+    viewModel: ProfilesViewModel,
+    onClearDnsCache: () -> Unit,
+    updateState: UpdateState,
+    onCheckUpdate: (UpdateChannel) -> Unit,
+    onDownloadUpdate: () -> Unit,
+    onInstallUpdate: () -> Unit,
+    onCancelUpdate: () -> Unit,
+    onOpen: (SettingsDestination) -> Unit,
+) {
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(contentPadding)
+            .testTag("settings-list"),
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        item(key = "appearance") {
+            SettingsCard(title = "Оформление") {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    ThemeMode.entries.forEach { mode ->
+                        FilterChip(
+                            selected = state.settings.themeMode == mode,
+                            onClick = { viewModel.setTheme(mode) },
+                            label = { Text(mode.displayName()) },
+                        )
+                    }
+                }
+                Text(
+                    "Системная тема следует Android; Dynamic Color используется на Android 12+.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                HorizontalDivider()
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 56.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Перенос строк JSON")
+                        Text(
+                            "Только вид редактора; профиль не меняется",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(
+                        checked = state.settings.rawEditorLineWrap,
+                        onCheckedChange = viewModel::setRawEditorLineWrap,
+                        modifier = Modifier.semantics {
+                            contentDescription = "Перенос строк в редакторе JSON"
+                        },
+                    )
+                }
+            }
+        }
+
+        item(key = "dns") {
+            SettingsCard(title = "DNS") {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    DnsMode.entries.forEach { mode ->
+                        FilterChip(
+                            selected = state.settings.dnsMode == mode,
+                            onClick = { viewModel.setDnsMode(mode) },
+                            label = { Text(mode.displayName()) },
+                        )
+                    }
+                }
+                Text(
+                    state.settings.dnsMode.description(),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    "Перехватывается TCP/UDP 53; встроенный DoH, DoT и mDNS не перехватываются.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                OutlinedButton(onClick = onClearDnsCache) { Text("Очистить DNS-кэш") }
+                Text(
+                    "Удаляет bootstrap LKG и контролируемо перезапускает core. Кэш Android не очищается.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+
+        item(key = "updates") {
+            SettingsCard(title = "Обновления") {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    UpdateChannel.entries.forEach { channel ->
+                        FilterChip(
+                            selected = state.settings.updateChannel == channel,
+                            onClick = { viewModel.setUpdateChannel(channel) },
+                            label = { Text(channel.displayName()) },
+                        )
+                    }
+                }
+                Text(
+                    "Канал применяется только при ручной проверке GitHub Releases. Ядро обновляется вместе с APK.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                UpdateControls(
+                    state = updateState,
+                    channel = state.settings.updateChannel,
+                    onCheck = onCheckUpdate,
+                    onDownload = onDownloadUpdate,
+                    onInstall = onInstallUpdate,
+                    onCancel = onCancelUpdate,
+                )
+            }
+        }
+
+        item(key = "sections") {
+            ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+                SettingsLinkRow(
+                    title = "Диагностика",
+                    subtitle = "Состояние VPN, версии и обслуживание DNS",
+                    onClick = { onOpen(SettingsDestination.Diagnostics) },
+                )
+                HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+                SettingsLinkRow(
+                    title = "Сообщество",
+                    subtitle = "Официальные Telegram-ссылки Zapret KVN",
+                    onClick = { onOpen(SettingsDestination.Community) },
+                )
+                HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+                SettingsLinkRow(
+                    title = "О приложении",
+                    subtitle = "Версия приложения, Android и pinned core",
+                    onClick = { onOpen(SettingsDestination.About) },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun UpdateControls(
+    state: UpdateState,
+    channel: UpdateChannel,
+    onCheck: (UpdateChannel) -> Unit,
+    onDownload: () -> Unit,
+    onInstall: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    when (state) {
+        UpdateState.Idle -> Button(
+            onClick = { onCheck(channel) },
+            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+        ) { Text("Проверить обновления") }
+
+        is UpdateState.Checking -> {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                CircularProgressIndicator(modifier = Modifier.padding(end = 12.dp))
+                Text("Проверка канала ${state.channel}…")
+            }
+            OutlinedButton(onClick = onCancel) { Text("Отмена") }
+        }
+
+        is UpdateState.UpToDate -> {
+            Text("Установлена последняя версия ${state.currentVersion} (${state.checkedTag}).")
+            OutlinedButton(onClick = { onCheck(channel) }) { Text("Проверить ещё раз") }
+        }
+
+        is UpdateState.Available -> {
+            ReleaseSummary(state.candidate.metadata.versionName, state.candidate.metadata.coreTag)
+            Button(
+                onClick = onDownload,
+                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+            ) { Text("Скачать и проверить APK") }
+        }
+
+        is UpdateState.Downloading -> {
+            val progress = if (state.totalBytes > 0) {
+                (state.downloadedBytes.toFloat() / state.totalBytes.toFloat()).coerceIn(0f, 1f)
+            } else {
+                0f
+            }
+            ReleaseSummary(state.candidate.metadata.versionName, state.candidate.metadata.coreTag)
+            LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth())
+            Text(
+                "${formatUpdateBytes(state.downloadedBytes)} / ${formatUpdateBytes(state.totalBytes)}",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            OutlinedButton(onClick = onCancel) { Text("Отменить и удалить") }
+        }
+
+        is UpdateState.Ready -> {
+            ReleaseSummary(state.candidate.metadata.versionName, state.candidate.metadata.coreTag)
+            Text("SHA-256, package, version и подпись проверены.")
+            Button(
+                onClick = onInstall,
+                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+            ) { Text("Открыть системную установку") }
+            OutlinedButton(onClick = onCancel) { Text("Удалить APK") }
+        }
+
+        is UpdateState.Failure -> {
+            Text(state.message, color = MaterialTheme.colorScheme.error)
+            if (state.candidate != null) {
+                Button(onClick = onDownload) { Text("Повторить загрузку") }
+            }
+            OutlinedButton(onClick = { onCheck(channel) }) { Text("Проверить заново") }
+        }
+    }
+}
+
+@Composable
+private fun ReleaseSummary(versionName: String, coreTag: String) {
+    Text("Доступна версия $versionName", fontWeight = FontWeight.SemiBold)
+    Text("Core $coreTag · arm64-v8a", style = MaterialTheme.typography.bodySmall)
+}
+
+private fun formatUpdateBytes(value: Long): String = when {
+    value >= 1024 * 1024 -> "%.1f МБ".format(value / (1024.0 * 1024.0))
+    value >= 1024 -> "%.1f КБ".format(value / 1024.0)
+    else -> "$value Б"
+}
+
+@Composable
+private fun DiagnosticsSettings(
+    contentPadding: PaddingValues,
+    vpnState: VpnConnectionState,
+    diagnostics: DiagnosticState,
+    onSelected: (Boolean) -> Unit,
+    onCreateDiagnosticShare: suspend () -> Intent,
+    onClearDnsCache: () -> Unit,
+    onBack: () -> Unit,
+) {
+    DisposableEffect(Unit) {
+        onSelected(true)
+        onDispose { onSelected(false) }
+    }
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var logsExpanded by rememberSaveable { mutableStateOf(false) }
+    var overlayExpanded by rememberSaveable { mutableStateOf(false) }
+    var exporting by remember { mutableStateOf(false) }
+    var exportError by remember { mutableStateOf<String?>(null) }
+
+    SettingsSubpage(contentPadding, "Диагностика", onBack) {
+        Column(
+            modifier = Modifier.testTag("diagnostics-screen"),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+        ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier.padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text("Текущее состояние", style = MaterialTheme.typography.titleMedium)
+                Text(vpnState.diagnosticLabel(), fontWeight = FontWeight.SemiBold)
+            }
+        }
+        ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier.padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text("Последняя ошибка", style = MaterialTheme.typography.titleMedium)
+                val failure = diagnostics.lastFailure
+                if (failure == null) {
+                    Text("Ошибок текущего запуска нет.")
+                } else {
+                    Text(
+                        failure.type.title,
+                        modifier = Modifier.testTag("diagnostic-error-type"),
+                        color = MaterialTheme.colorScheme.error,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(failure.message, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
+        ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier.padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text("Среда", style = MaterialTheme.typography.titleMedium)
+                Text("Zapret KVN ${BuildConfig.VERSION_NAME}")
+                Text("Core ${BuildConfig.CORE_TAG} · ${BuildConfig.CORE_COMMIT.take(12)}")
+                Text("Android ${Build.VERSION.RELEASE} · API ${Build.VERSION.SDK_INT}")
+                val vpnPolicy = diagnostics.vpnPolicy
+                when {
+                    vpnPolicy == null -> Text(
+                        "Always-on/Lockdown: статус появится при запуске VPN.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    !vpnPolicy.statusAvailable -> Text(
+                        "Always-on/Lockdown: Android API < 29 не даёт публичный статус.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    vpnPolicy.alwaysOn || vpnPolicy.lockdown -> Text(
+                        "Always-on: ${vpnPolicy.alwaysOn.yesNo()} · Lockdown: ${vpnPolicy.lockdown.yesNo()}. " +
+                            "Эти режимы пока не поддерживаются; отключите их в Android.",
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    else -> Text(
+                        "Always-on: нет · Lockdown: нет",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
+        }
+        ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier.padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text("Сеть Android", style = MaterialTheme.typography.titleMedium)
+                val network = diagnostics.network
+                if (network == null) {
+                    Text("Состояние появится при подключении или экспорте отчёта.")
+                } else {
+                    Text(
+                        "${network.transport} · ${network.interfaceName ?: "интерфейс не определён"}",
+                    )
+                    Text(
+                        "Validated: ${network.validated.yesNo()} · Metered: ${network.metered.yesNo()}",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    Text(
+                        "Private DNS: ${network.privateDnsMode} · active: ${network.privateDnsActive.yesNo()}",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
+        }
+        ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier.padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text("Последние логи", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    if (diagnostics.logStreamActive) {
+                        "Поток core активен только пока открыт этот экран."
+                    } else {
+                        "Поток core не активен; сохранены только bounded строки текущего запуска."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                OutlinedButton(
+                    onClick = { logsExpanded = !logsExpanded },
+                    modifier = Modifier.testTag("diagnostic-logs-toggle"),
+                ) {
+                    Text(if (logsExpanded) "Скрыть (${diagnostics.logs.size})" else "Показать (${diagnostics.logs.size})")
+                }
+                if (logsExpanded) {
+                    if (diagnostics.logs.isEmpty()) {
+                        Text("Строк логов пока нет.")
+                    } else {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 360.dp)
+                                .verticalScroll(rememberScrollState()),
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            diagnostics.logs.forEach { line ->
+                                Text(
+                                    "${line.levelName}: ${line.message}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontFamily = FontFamily.Monospace,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        diagnostics.effectiveOverlay?.let { overlay ->
+            ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    modifier = Modifier.padding(18.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text("Effective overlay", style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        "Только структура managed zapret-* без адресов, правил сопоставления и credentials.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    OutlinedButton(onClick = { overlayExpanded = !overlayExpanded }) {
+                        Text(if (overlayExpanded) "Скрыть" else "Показать")
+                    }
+                    if (overlayExpanded) {
+                        Text(
+                            overlay,
+                            style = MaterialTheme.typography.bodySmall,
+                            fontFamily = FontFamily.Monospace,
+                        )
+                    }
+                }
+            }
+        }
+        OutlinedButton(
+            enabled = !exporting,
+            onClick = {
+                scope.launch {
+                    exporting = true
+                    exportError = null
+                    try {
+                        val shareIntent = onCreateDiagnosticShare()
+                        context.startActivity(
+                            Intent.createChooser(shareIntent, "Передать диагностику"),
+                        )
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (_: ActivityNotFoundException) {
+                        exportError = "Не найдено приложение для передачи файла."
+                    } catch (_: SecurityException) {
+                        exportError = "Android запретил передачу файла."
+                    } catch (_: Throwable) {
+                        exportError = "Не удалось создать диагностический файл."
+                    } finally {
+                        exporting = false
+                    }
+                }
+            },
+            modifier = Modifier.testTag("export-diagnostics"),
+        ) {
+            if (exporting) {
+                CircularProgressIndicator(
+                    modifier = Modifier.padding(end = 8.dp),
+                    strokeWidth = 2.dp,
+                )
+            }
+            Text("Создать и передать diagnostic JSON")
+        }
+        exportError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        OutlinedButton(onClick = onClearDnsCache) { Text("Очистить DNS-кэш и перезапустить core") }
+        Text(
+            "Файл создаётся только этой кнопкой во временном cache. Runtime-лог на диск не пишется; файл удаляется при следующем запуске.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        }
+    }
+}
+
+@Composable
+private fun CommunitySettings(
+    contentPadding: PaddingValues,
+    onBack: () -> Unit,
+) {
+    val context = LocalContext.current
+    var openError by remember { mutableStateOf<String?>(null) }
+    val openLink: (String) -> Unit = { url ->
+        try {
+            context.startActivity(Intent(Intent.ACTION_VIEW, url.toUri()))
+            openError = null
+        } catch (_: ActivityNotFoundException) {
+            openError = "Не найдено приложение для открытия ссылки."
+        } catch (_: SecurityException) {
+            openError = "Android запретил открыть ссылку."
+        }
+    }
+
+    SettingsSubpage(contentPadding, "Сообщество", onBack) {
+        Text(
+            "Независимый клиент работает с любыми совместимыми профилями. Эти ссылки относятся только к сообществу Zapret KVN.",
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+            SettingsLinkRow(
+                title = "Zapret KVN",
+                subtitle = "Telegram-канал",
+                onClick = { openLink("https://t.me/bypassblock") },
+            )
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+            SettingsLinkRow(
+                title = "VPN Discord YouTube",
+                subtitle = "Telegram-сообщество",
+                onClick = { openLink("https://t.me/vpndiscordyooutube") },
+            )
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+            SettingsLinkRow(
+                title = "Zapret VPN bot",
+                subtitle = "Telegram-бот",
+                onClick = { openLink("https://t.me/zapretvpns_bot") },
+            )
+        }
+        openError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+    }
+}
+
+@Composable
+private fun AboutSettings(
+    contentPadding: PaddingValues,
+    onBack: () -> Unit,
+) {
+    SettingsSubpage(contentPadding, "О приложении", onBack) {
+        ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier.padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text("Zapret KVN", style = MaterialTheme.typography.headlineSmall)
+                Text("Версия ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
+                Text(
+                    "Независимый Android-клиент и GUI для sing-box-extended. Конфигурация хранится как настоящий sing-box JSON.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier.padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text("Ядро", style = MaterialTheme.typography.titleMedium)
+                Text(BuildConfig.CORE_TAG)
+                Text(BuildConfig.CORE_COMMIT, style = MaterialTheme.typography.bodySmall)
+                Text(
+                    "Core встроен в APK из зафиксированной ревизии; динамической загрузки ядра нет.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier.padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text("Известные ограничения MVP", style = MaterialTheme.typography.titleMedium)
+                Text("• Android 8+; release APK — только arm64-v8a, интерфейс рассчитан на телефоны.")
+                Text("• Always-on/Lockdown и shared UID не поддерживаются как гарантированный per-app режим.")
+                Text("• Managed DNS перехватывает TCP/UDP 53, но не встроенный DoH, DoT или mDNS; FakeIP выключен.")
+                Text("• Domain-only block не является firewall: для гарантии нужен IP/CIDR rule-set.")
+                Text("• Clash YAML и Hysteria v1 URI пока не импортируются; raw JSON остаётся ответственностью пользователя.")
+                Text("• Подписки, core и APK обновляются только вручную; silent install и фоновая синхронизация отсутствуют.")
+                Text("• При неработающем proxy/DNS VPN закрывается без бесконечного retry и plaintext DNS fallback.")
+            }
+        }
+        Text(
+            "Лицензия приложения: GPL-3.0. Лицензии ядра и библиотек включены в APK и NOTICE.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+private fun SettingsSubpage(
+    contentPadding: PaddingValues,
+    title: String,
+    onBack: () -> Unit,
+    content: @Composable () -> Unit,
+) {
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(contentPadding),
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        item(key = "header") {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 56.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                IconButton(onClick = onBack) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад")
+                }
+                Text(
+                    title,
+                    style = MaterialTheme.typography.headlineSmall,
+                    modifier = Modifier.semantics { heading() },
+                )
+            }
+        }
+        item(key = "content") {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp), content = { content() })
+        }
+    }
+}
+
+@Composable
+private fun SettingsCard(
+    title: String,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text(
+                title,
+                style = MaterialTheme.typography.titleLarge,
+                modifier = Modifier.semantics { heading() },
+            )
+            content()
+        }
+    }
+}
+
+@Composable
+private fun SettingsLinkRow(
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 72.dp)
+            .clickable(onClick = onClick)
+            .semantics { contentDescription = "$title. $subtitle" }
+            .padding(horizontal = 18.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, fontWeight = FontWeight.Medium)
+            Text(
+                subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Text("›", style = MaterialTheme.typography.headlineSmall)
+    }
+}
+
+private fun ThemeMode.displayName(): String = when (this) {
+    ThemeMode.System -> "Системная"
+    ThemeMode.Light -> "Светлая"
+    ThemeMode.Dark -> "Тёмная"
+}
+
+private fun UpdateChannel.displayName(): String = when (this) {
+    UpdateChannel.Stable -> "Stable"
+    UpdateChannel.Beta -> "Beta"
+}
+
+private fun DnsMode.displayName(): String = when (this) {
+    DnsMode.Automatic -> "Автоматически"
+    DnsMode.Android -> "DNS Android"
+    DnsMode.Secure -> "Защищённый через VPN"
+    DnsMode.FromJson -> "Из JSON"
+}
+
+private fun DnsMode.description(): String = when (this) {
+    DnsMode.Automatic -> "Android DNS для bootstrap/LAN, DoH через выбранный proxy для остального."
+    DnsMode.Android -> "Системный resolver и Private DNS Android остаются источником истины."
+    DnsMode.Secure -> "Стандартный DNS выбранных приложений идёт в DoH через proxy."
+    DnsMode.FromJson -> "DNS-секция профиля запускается без managed-подмены."
+}
+
+private fun VpnConnectionState.diagnosticLabel(): String = when (this) {
+    VpnConnectionState.Stopped -> "VPN выключен"
+    is VpnConnectionState.Starting -> "Подключение: $message"
+    is VpnConnectionState.Connected -> "Подключено: $profileName"
+    is VpnConnectionState.Stopping -> "Отключение"
+    is VpnConnectionState.Error -> "Ошибка VPN"
+}
+
+private fun Boolean.yesNo(): String = if (this) "да" else "нет"

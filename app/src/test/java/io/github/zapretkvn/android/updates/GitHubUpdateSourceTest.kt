@@ -1,0 +1,95 @@
+package io.github.zapretkvn.android.updates
+
+import io.github.zapretkvn.android.ui.UpdateChannel
+import java.io.File
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertThrows
+import org.junit.Test
+
+class GitHubUpdateSourceTest {
+    @Test
+    fun `stable release requires metadata apk and two agreeing digests`() {
+        val http = FakeHttp()
+        http.text[LATEST] = release(prerelease = false)
+        http.text[METADATA_URL] = metadata(SHA)
+        http.text[CHECKSUM_URL] = "$SHA  $APK"
+
+        val candidate = GitHubUpdateSource(REPOSITORY, APPLICATION_ID, http).latest(UpdateChannel.Stable)
+
+        assertEquals(102_003_099, candidate.metadata.versionCode)
+        assertEquals(APK, candidate.apkAsset.name)
+    }
+
+    @Test
+    fun `beta accepts prerelease while stable and checksum mismatch fail closed`() {
+        val betaHttp = FakeHttp().apply {
+            text[LIST] = "[${release(prerelease = true)}]"
+            text[LATEST] = release(prerelease = true)
+            text[METADATA_URL] = metadata(SHA)
+            text[CHECKSUM_URL] = "$SHA  $APK"
+        }
+        assertEquals(
+            "v1.2.3",
+            GitHubUpdateSource(REPOSITORY, APPLICATION_ID, betaHttp)
+                .latest(UpdateChannel.Beta).release.tag,
+        )
+        assertThrows(UpdateException::class.java) {
+            GitHubUpdateSource(REPOSITORY, APPLICATION_ID, betaHttp).latest(UpdateChannel.Stable)
+        }
+
+        betaHttp.text[CHECKSUM_URL] = "${"f".repeat(64)}  $APK"
+        assertThrows(UpdateException::class.java) {
+            GitHubUpdateSource(REPOSITORY, APPLICATION_ID, betaHttp).latest(UpdateChannel.Beta)
+        }
+    }
+
+    @Test
+    fun `only fixed github https hosts are accepted`() {
+        assertEquals("https://api.github.com/repos/a/b", GitHubHttpsClient.validatedUrl("https://api.github.com/repos/a/b"))
+        assertEquals(
+            "https://release-assets.githubusercontent.com/file",
+            GitHubHttpsClient.validatedUrl("https://release-assets.githubusercontent.com/file"),
+        )
+        assertThrows(UpdateException::class.java) { GitHubHttpsClient.validatedUrl("http://github.com/file") }
+        assertThrows(UpdateException::class.java) { GitHubHttpsClient.validatedUrl("https://example.com/file") }
+        assertThrows(UpdateException::class.java) { GitHubHttpsClient.validatedUrl("https://github.com@evil.example/file") }
+    }
+
+    private class FakeHttp : UpdateHttpClient {
+        val text = mutableMapOf<String, String>()
+        override fun readText(url: String, maxBytes: Int): String = text[url] ?: error("missing $url")
+        override fun download(url: String, target: File, expectedBytes: Long, onProgress: (Long) -> Unit) =
+            error("not used")
+    }
+
+    private companion object {
+        const val REPOSITORY = "ZapretKVN/ZapretKVN"
+        const val APPLICATION_ID = "io.github.zapretkvn.android"
+        const val LATEST = "https://api.github.com/repos/$REPOSITORY/releases/latest"
+        const val LIST = "https://api.github.com/repos/$REPOSITORY/releases?per_page=10"
+        const val METADATA_URL = "https://github.com/ZapretKVN/ZapretKVN/releases/download/v1.2.3/release-metadata.json"
+        const val CHECKSUM_URL = "https://github.com/ZapretKVN/ZapretKVN/releases/download/v1.2.3/app.sha256"
+        const val APK_URL = "https://github.com/ZapretKVN/ZapretKVN/releases/download/v1.2.3/app"
+        const val APK = "Zapret-KVN-v1.2.3-arm64-v8a.apk"
+        const val SHA = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+
+        fun release(prerelease: Boolean) = """
+            {
+              "tag_name":"v1.2.3","name":"1.2.3","html_url":"https://github.com/ZapretKVN/ZapretKVN/releases/tag/v1.2.3",
+              "draft":false,"prerelease":$prerelease,
+              "assets":[
+                {"name":"release-metadata.json","browser_download_url":"$METADATA_URL","size":500},
+                {"name":"$APK","browser_download_url":"$APK_URL","size":1234,"digest":"sha256:$SHA"},
+                {"name":"$APK.sha256","browser_download_url":"$CHECKSUM_URL","size":100}
+              ]
+            }
+        """
+
+        fun metadata(sha: String) = """
+            {"schema":1,"version_name":"1.2.3","version_code":102003099,
+             "application_id":"$APPLICATION_ID","core_tag":"v1.13.14-extended-2.5.2",
+             "core_commit":"ff11f007ec798136a5de258f947a4f34011a37ea","abi":["arm64-v8a"],
+             "apk_file":"$APK","apk_sha256":"$sha","apk_size":1234}
+        """
+    }
+}

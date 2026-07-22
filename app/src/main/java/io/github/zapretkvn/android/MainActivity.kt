@@ -1,0 +1,221 @@
+package io.github.zapretkvn.android
+
+import android.Manifest
+import android.app.Activity
+import android.content.pm.PackageManager
+import android.content.ActivityNotFoundException
+import android.content.Intent
+import android.provider.Settings
+import android.os.Build
+import android.os.Bundle
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
+import androidx.activity.viewModels
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.collectAsState
+import androidx.core.content.ContextCompat
+import androidx.core.net.toUri
+import io.github.zapretkvn.android.profiles.ProfilesViewModel
+import io.github.zapretkvn.android.routing.RoutingViewModel
+import io.github.zapretkvn.android.ui.ZapretApp
+import io.github.zapretkvn.android.ui.ThemeMode
+import io.github.zapretkvn.android.ui.theme.ZapretTheme
+import io.github.zapretkvn.android.vpn.AppsViewModel
+import io.github.zapretkvn.android.vpn.VpnController
+
+class MainActivity : ComponentActivity() {
+    private val vpnController: VpnController
+        get() = (application as ZapretApplication).container.vpnController
+    private var pendingProfileId: String? = null
+    private var activityStarted = false
+    private var homeSelected = false
+    private var diagnosticsSelected = false
+    private var pendingUpdateInstall = false
+    private val updateController
+        get() = (application as ZapretApplication).container.updateController
+    private val vpnPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) { result ->
+        val profileId = pendingProfileId
+        pendingProfileId = null
+        if (result.resultCode == Activity.RESULT_OK && profileId != null) {
+            vpnController.start(profileId)
+        } else {
+            vpnController.publishMessage("Android не выдал разрешение VPN.")
+        }
+    }
+    private val notificationPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) {
+        continueVpnPermissionRequest()
+    }
+    private val updateInstallerLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) { result ->
+        updateController.onInstallerFinished(result.resultCode == Activity.RESULT_OK)
+    }
+    private val unknownSourceLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) {
+        val shouldContinue = pendingUpdateInstall
+        pendingUpdateInstall = false
+        if (shouldContinue && canRequestPackageInstalls()) {
+            launchUpdateInstaller()
+        } else if (shouldContinue) {
+            updateController.failInstallation("Android не разрешил установку из этого источника.")
+        }
+    }
+    private val profilesViewModel: ProfilesViewModel by viewModels {
+        (application as ZapretApplication).container.profilesViewModelFactory
+    }
+    private val appsViewModel: AppsViewModel by viewModels {
+        (application as ZapretApplication).container.appsViewModelFactory
+    }
+    private val routingViewModel: RoutingViewModel by viewModels {
+        (application as ZapretApplication).container.routingViewModelFactory
+    }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
+        setContent {
+            val state by profilesViewModel.state.collectAsState()
+            val appsState by appsViewModel.state.collectAsState()
+            val vpnState by vpnController.state.collectAsState()
+            val selectorGroups by vpnController.selectorGroups.collectAsState()
+            val sessionStats by vpnController.sessionStats.collectAsState()
+            val diagnostics by vpnController.diagnostics.collectAsState()
+            val routingState by routingViewModel.state.collectAsState()
+            val vpnMessage by vpnController.message.collectAsState()
+            val updateState by updateController.state.collectAsState()
+            val systemDark = isSystemInDarkTheme()
+            val darkTheme = when (state.settings.themeMode) {
+                ThemeMode.System -> systemDark
+                ThemeMode.Light -> false
+                ThemeMode.Dark -> true
+            }
+            ZapretTheme(darkTheme = darkTheme) {
+                ZapretApp(
+                    profilesViewModel = profilesViewModel,
+                    state = state,
+                    appsViewModel = appsViewModel,
+                    appsState = appsState,
+                    routingViewModel = routingViewModel,
+                    routingState = routingState,
+                    vpnState = vpnState,
+                    selectorGroups = selectorGroups,
+                    sessionStats = sessionStats,
+                    diagnostics = diagnostics,
+                    vpnMessage = vpnMessage,
+                    onVpnMessageConsumed = vpnController::consumeMessage,
+                    onVpnStart = ::requestVpnStart,
+                    onVpnStop = vpnController::stop,
+                    onSelectOutbound = vpnController::selectOutbound,
+                    onMeasurePing = vpnController::measurePing,
+                    onMeasureGroup = vpnController::measureGroup,
+                    onHomeSelected = ::setHomeSelected,
+                    onDiagnosticsSelected = ::setDiagnosticsSelected,
+                    onCreateDiagnosticShare = {
+                        (application as ZapretApplication).container.diagnosticExporter.createShareIntent()
+                    },
+                    onClearDnsCache = vpnController::clearDnsCache,
+                    updateState = updateState,
+                    onCheckUpdate = updateController::check,
+                    onDownloadUpdate = updateController::download,
+                    onInstallUpdate = ::requestUpdateInstall,
+                    onCancelUpdate = updateController::cancelAndDelete,
+                )
+            }
+        }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        activityStarted = true
+        updateVisibleStreams()
+    }
+
+    override fun onStop() {
+        activityStarted = false
+        updateVisibleStreams()
+        super.onStop()
+    }
+
+    private fun setHomeSelected(selected: Boolean) {
+        homeSelected = selected
+        updateVisibleStreams()
+    }
+
+    private fun setDiagnosticsSelected(selected: Boolean) {
+        diagnosticsSelected = selected
+        updateVisibleStreams()
+    }
+
+    private fun updateVisibleStreams() {
+        vpnController.setHomeVisible(activityStarted && homeSelected)
+        vpnController.setDiagnosticsVisible(activityStarted && diagnosticsSelected)
+    }
+
+    private fun requestVpnStart(profileId: String) {
+        pendingProfileId = profileId
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            continueVpnPermissionRequest()
+        }
+    }
+
+    private fun continueVpnPermissionRequest() {
+        val profileId = pendingProfileId ?: return
+        val permissionIntent = vpnController.permissionIntent()
+        if (permissionIntent == null) {
+            pendingProfileId = null
+            vpnController.start(profileId)
+        } else {
+            vpnPermissionLauncher.launch(permissionIntent)
+        }
+    }
+
+    private fun requestUpdateInstall() {
+        if (!canRequestPackageInstalls()) {
+            pendingUpdateInstall = true
+            try {
+                unknownSourceLauncher.launch(
+                    Intent(
+                        Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                        "package:$packageName".toUri(),
+                    ),
+                )
+            } catch (_: ActivityNotFoundException) {
+                pendingUpdateInstall = false
+                updateController.failInstallation("Android не открыл настройку установки из источника.")
+            } catch (_: SecurityException) {
+                pendingUpdateInstall = false
+                updateController.failInstallation("Android запретил открыть настройку установки.")
+            }
+            return
+        }
+        launchUpdateInstaller()
+    }
+
+    private fun canRequestPackageInstalls(): Boolean =
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.O || packageManager.canRequestPackageInstalls()
+
+    private fun launchUpdateInstaller() {
+        try {
+            updateInstallerLauncher.launch(updateController.createInstallIntent())
+        } catch (_: ActivityNotFoundException) {
+            updateController.failInstallation("Системный установщик APK не найден.")
+        } catch (_: SecurityException) {
+            updateController.failInstallation("Android запретил запуск системной установки.")
+        } catch (error: Exception) {
+            updateController.failInstallation(error.message ?: "Не удалось открыть системную установку.")
+        }
+    }
+}

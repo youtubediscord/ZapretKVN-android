@@ -1,0 +1,323 @@
+package io.github.zapretkvn.android.ui
+
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.Button
+import androidx.compose.material3.CenterAlignedTopAppBar
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import io.github.zapretkvn.android.vpn.AppsUiState
+import io.github.zapretkvn.android.vpn.AppsViewModel
+import io.github.zapretkvn.android.vpn.AppScopeMode
+import io.github.zapretkvn.android.vpn.InstalledApp
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun AppPickerScreen(
+    state: AppsUiState,
+    viewModel: AppsViewModel,
+    onBack: () -> Unit,
+) {
+    var query by rememberSaveable { mutableStateOf("") }
+    var showSystem by rememberSaveable { mutableStateOf(false) }
+    BackHandler(onBack = onBack)
+
+    val matchingApps = state.apps.filter { app ->
+        query.isBlank() ||
+            app.label.contains(query, ignoreCase = true) ||
+            app.packageName.contains(query, ignoreCase = true)
+    }
+    val suggestedApps = matchingApps.filter { it.suggestion != null }
+    val regularApps = matchingApps.filter { app ->
+        app.suggestion == null && (
+            !app.system || showSystem || app.packageName in state.allowedPackages
+        )
+    }
+
+    Scaffold(
+        topBar = {
+            CenterAlignedTopAppBar(
+                title = { Text("Приложения") },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад")
+                    }
+                },
+            )
+        },
+    ) { padding ->
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding),
+            contentPadding = PaddingValues(bottom = 24.dp),
+        ) {
+            item(key = "controls") {
+                Column(
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    OutlinedTextField(
+                        value = query,
+                        onValueChange = { query = it },
+                        label = { Text("Поиск по имени или package") },
+                        singleLine = true,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("app-search"),
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Показывать системные")
+                            Text(
+                                "Службы Android скрыты по умолчанию",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Switch(
+                            checked = showSystem,
+                            onCheckedChange = { showSystem = it },
+                            modifier = Modifier
+                                .testTag("show-system-apps")
+                                .semantics {
+                                    contentDescription = "Показывать системные приложения"
+                                },
+                        )
+                    }
+                    Text(
+                        if (state.scopeMode == AppScopeMode.Include) {
+                            "В VPN: ${state.allowedPackages.size}"
+                        } else {
+                            "Исключено из VPN: ${state.allowedPackages.size}"
+                        },
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                    if (state.scopeMode == AppScopeMode.Exclude) {
+                        Text(
+                            "Расширенный режим: отмеченные приложения идут напрямую, все остальные — через VPN. Пустой список заблокирован.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                    Text(
+                        "Список приложений обрабатывается только на устройстве и никуда не отправляется.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+
+            if (state.loading) {
+                item(key = "loading") {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(24.dp),
+                        horizontalArrangement = Arrangement.Center,
+                    ) {
+                        CircularProgressIndicator()
+                    }
+                }
+            }
+
+            state.error?.let { loadError ->
+                item(key = "error") {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Text(loadError, color = MaterialTheme.colorScheme.error)
+                        OutlinedButton(onClick = viewModel::refresh) { Text("Повторить") }
+                    }
+                }
+            }
+
+            if (state.missingPackages.isNotEmpty()) {
+                item(key = "missing-header") {
+                    SectionHeader("Недоступные")
+                }
+                items(state.missingPackages.toList(), key = { "missing-$it" }) { packageName ->
+                    MissingAppRow(
+                        packageName = packageName,
+                        onRemove = { viewModel.setAllowed(packageName, false) },
+                    )
+                }
+            }
+
+            if (suggestedApps.isNotEmpty()) {
+                item(key = "suggested-header") {
+                    SectionHeader("Популярные")
+                }
+                items(suggestedApps, key = { "suggested-${it.packageName}" }) { app ->
+                    AppRow(app, state.allowedPackages, viewModel)
+                }
+            }
+
+            if (regularApps.isNotEmpty()) {
+                item(key = "apps-header") {
+                    SectionHeader(if (showSystem) "Все приложения" else "Установленные")
+                }
+                items(regularApps, key = InstalledApp::packageName) { app ->
+                    AppRow(app, state.allowedPackages, viewModel)
+                }
+            }
+
+            if (!state.loading && state.error == null &&
+                suggestedApps.isEmpty() && regularApps.isEmpty() &&
+                state.missingPackages.isEmpty()
+            ) {
+                item(key = "empty") {
+                    Text(
+                        if (query.isBlank()) "Приложения не найдены." else "По запросу ничего не найдено.",
+                        modifier = Modifier.padding(24.dp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+
+            if (state.missingPackages.isNotEmpty()) {
+                item(key = "remove-missing") {
+                    TextButton(
+                        onClick = viewModel::removeMissingPackages,
+                        modifier = Modifier.padding(horizontal = 8.dp),
+                    ) {
+                        Text("Удалить все недоступные")
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SectionHeader(title: String) {
+    Text(
+        text = title,
+        style = MaterialTheme.typography.titleSmall,
+        fontWeight = FontWeight.Bold,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier
+            .padding(horizontal = 16.dp, vertical = 10.dp)
+            .semantics { heading() },
+    )
+}
+
+@Composable
+private fun AppRow(
+    app: InstalledApp,
+    selectedPackages: Set<String>,
+    viewModel: AppsViewModel,
+) {
+    val selected = app.packageName in selectedPackages
+    val canToggle = app.enabled || selected
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 64.dp)
+            .testTag("app-row-${app.packageName}")
+            .clickable(enabled = canToggle) {
+                viewModel.setAllowed(app.packageName, !selected)
+            }
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(app.label, fontWeight = FontWeight.Medium)
+            Text(
+                app.packageName,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            val details = buildList {
+                app.suggestion?.let { add("Рекомендуем: $it") }
+                if (app.system) add("Системное")
+                if (!app.enabled) add("Отключено")
+            }.joinToString(" · ")
+            if (details.isNotEmpty()) {
+                Text(
+                    details,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (app.enabled) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.error
+                    },
+                )
+            }
+        }
+        Checkbox(
+            checked = selected,
+            onCheckedChange = null,
+            enabled = canToggle,
+        )
+    }
+    HorizontalDivider()
+}
+
+@Composable
+private fun MissingAppRow(
+    packageName: String,
+    onRemove: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 64.dp)
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(packageName, fontWeight = FontWeight.Medium)
+            Text(
+                "Пакет удалён или недоступен. VPN не запустится.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
+        TextButton(onClick = onRemove) { Text("Убрать") }
+    }
+    HorizontalDivider()
+}

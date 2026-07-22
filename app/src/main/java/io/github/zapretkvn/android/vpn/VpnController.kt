@@ -1,0 +1,339 @@
+package io.github.zapretkvn.android.vpn
+
+import android.content.Context
+import android.content.Intent
+import android.net.VpnService
+import androidx.core.content.ContextCompat
+import io.github.zapretkvn.android.diagnostics.DiagnosticFailure
+import io.github.zapretkvn.android.diagnostics.DiagnosticFailureClassifier
+import io.github.zapretkvn.android.diagnostics.DiagnosticLogLine
+import io.github.zapretkvn.android.diagnostics.DiagnosticNetworkState
+import io.github.zapretkvn.android.diagnostics.DiagnosticState
+import io.github.zapretkvn.android.diagnostics.DiagnosticVpnPolicy
+import io.github.zapretkvn.android.diagnostics.SecretRedactor
+import io.github.zapretkvn.android.diagnostics.appendBounded
+import java.util.concurrent.atomic.AtomicLong
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
+
+class VpnController(private val context: Context) {
+    private val mutableState = MutableStateFlow<VpnConnectionState>(VpnConnectionState.Stopped)
+    private val mutableGroups = MutableStateFlow<List<RuntimeSelectorGroup>>(emptyList())
+    private val mutableMessage = MutableStateFlow<String?>(null)
+    private val mutableHomeVisible = MutableStateFlow(false)
+    private val mutableDiagnosticsVisible = MutableStateFlow(false)
+    private val mutableDiagnostics = MutableStateFlow(DiagnosticState())
+    private val trafficAccumulator = SessionTrafficAccumulator()
+    private val mutableSessionStats = MutableStateFlow(trafficAccumulator.value)
+    private val trafficLock = Any()
+    private val latestGeneration = AtomicLong(0)
+
+    val state: StateFlow<VpnConnectionState> = mutableState.asStateFlow()
+    val selectorGroups: StateFlow<List<RuntimeSelectorGroup>> = mutableGroups.asStateFlow()
+    val message: StateFlow<String?> = mutableMessage.asStateFlow()
+    val sessionStats: StateFlow<VpnSessionStats> = mutableSessionStats.asStateFlow()
+    val diagnostics: StateFlow<DiagnosticState> = mutableDiagnostics.asStateFlow()
+    internal val homeVisible: StateFlow<Boolean> = mutableHomeVisible.asStateFlow()
+    internal val diagnosticsVisible: StateFlow<Boolean> = mutableDiagnosticsVisible.asStateFlow()
+
+    fun permissionIntent(): Intent? = VpnService.prepare(context)
+
+    fun start(profileId: String) {
+        require(profileId.isNotBlank()) { "Профиль не выбран." }
+        ContextCompat.startForegroundService(
+            context,
+            ZapretVpnService.startIntent(context, profileId),
+        )
+    }
+
+    fun stop() {
+        ContextCompat.startForegroundService(context, ZapretVpnService.stopIntent(context))
+    }
+
+    fun restartIfConnected(reason: String) {
+        val connected = mutableState.value as? VpnConnectionState.Connected ?: return
+        ContextCompat.startForegroundService(
+            context,
+            ZapretVpnService.restartIntent(context, connected.profileId, reason),
+        )
+    }
+
+    fun clearDnsCache() {
+        ContextCompat.startForegroundService(context, ZapretVpnService.clearDnsCacheIntent(context))
+    }
+
+    fun selectOutbound(profileId: String, groupTag: String, outboundTag: String) {
+        ContextCompat.startForegroundService(
+            context,
+            ZapretVpnService.selectIntent(context, profileId, groupTag, outboundTag),
+        )
+    }
+
+    fun measurePing() {
+        if (mutableState.value !is VpnConnectionState.Connected) return
+        ContextCompat.startForegroundService(context, ZapretVpnService.pingIntent(context))
+    }
+
+    fun measureGroup(groupTag: String) {
+        val connected = mutableState.value as? VpnConnectionState.Connected ?: return
+        if (groupTag.isBlank()) return
+        ContextCompat.startForegroundService(
+            context,
+            ZapretVpnService.pingGroupIntent(context, connected.profileId, groupTag),
+        )
+    }
+
+    fun setHomeVisible(visible: Boolean) {
+        mutableHomeVisible.value = visible
+        if (!visible) {
+            synchronized(trafficLock) {
+                trafficAccumulator.setStatusStreamActive(currentGeneration(), false)?.let {
+                    mutableSessionStats.value = it
+                }
+            }
+        }
+    }
+
+    fun setDiagnosticsVisible(visible: Boolean) {
+        mutableDiagnosticsVisible.value = visible
+        if (!visible) publishDiagnosticLogStream(currentGeneration(), false)
+    }
+
+    internal fun publish(generation: Long, state: VpnConnectionState) {
+        while (true) {
+            val previous = latestGeneration.get()
+            if (generation < previous) return
+            if (latestGeneration.compareAndSet(previous, generation)) break
+        }
+        val safeState = if (state is VpnConnectionState.Error) {
+            state.copy(message = sanitizeDiagnosticText(state.message, 360))
+        } else {
+            state
+        }
+        mutableState.value = safeState
+        updateDiagnosticConnectionState(generation, safeState)
+        synchronized(trafficLock) {
+            when (safeState) {
+                is VpnConnectionState.Connected -> {
+                    mutableSessionStats.value = trafficAccumulator.start(
+                        generation = generation,
+                        profileId = safeState.profileId,
+                        connectedAtEpochMillis = safeState.connectedAtEpochMillis,
+                    )
+                }
+                is VpnConnectionState.Starting,
+                is VpnConnectionState.Stopped,
+                is VpnConnectionState.Error,
+                is VpnConnectionState.Stopping,
+                -> mutableSessionStats.value = trafficAccumulator.stop()
+            }
+        }
+        if (
+            safeState is VpnConnectionState.Starting ||
+            safeState is VpnConnectionState.Stopped ||
+            safeState is VpnConnectionState.Error
+        ) {
+            mutableGroups.value = emptyList()
+        }
+    }
+
+    internal fun nextGeneration(): Long = latestGeneration.incrementAndGet()
+
+    internal fun currentGeneration(): Long = latestGeneration.get()
+
+    internal fun publishGroups(generation: Long, groups: List<RuntimeSelectorGroup>) {
+        if (generation < latestGeneration.get()) return
+        mutableGroups.value = groups
+    }
+
+    internal fun publishSelection(generation: Long, groupTag: String, outboundTag: String) {
+        if (generation < latestGeneration.get()) return
+        mutableGroups.update { groups ->
+            groups.map { group ->
+                if (group.tag == groupTag) group.copy(selected = outboundTag) else group
+            }
+        }
+    }
+
+    internal fun publishMessage(message: String) {
+        val safe = sanitizeDiagnosticText(message, 360)
+        mutableMessage.value = safe
+        appendApplicationDiagnosticLog(level = 5, message = safe)
+    }
+
+    internal fun publishDiagnosticNetwork(generation: Long, state: UnderlyingNetworkState) {
+        if (generation < latestGeneration.get()) return
+        mutableDiagnostics.update {
+            it.copy(
+                generation = generation,
+                network = DiagnosticNetworkState(
+                    available = state.network != null,
+                    transport = state.transport,
+                    interfaceName = state.interfaceName,
+                    metered = state.metered,
+                    validated = state.validated,
+                    captivePortal = state.captivePortal,
+                    privateDnsMode = state.privateDnsMode.name.lowercase(),
+                    privateDnsActive = state.privateDnsActive,
+                ),
+            )
+        }
+    }
+
+    internal fun publishVpnSystemPolicy(generation: Long, policy: VpnSystemPolicy) {
+        if (generation < latestGeneration.get()) return
+        mutableDiagnostics.update {
+            it.copy(
+                generation = generation,
+                vpnPolicy = DiagnosticVpnPolicy(
+                    statusAvailable = policy.statusAvailable,
+                    alwaysOn = policy.alwaysOn,
+                    lockdown = policy.lockdown,
+                ),
+            )
+        }
+    }
+
+    internal fun publishEffectiveOverlay(generation: Long, overlay: String) {
+        if (generation < latestGeneration.get()) return
+        mutableDiagnostics.update { it.copy(generation = generation, effectiveOverlay = overlay) }
+    }
+
+    internal fun clearCoreDiagnosticLogs(generation: Long) {
+        if (generation != currentGeneration()) return
+        mutableDiagnostics.update { it.copy(coreLogs = emptyList()) }
+    }
+
+    internal fun publishCoreDiagnosticLog(generation: Long, level: Int, message: String) {
+        if (generation != currentGeneration()) return
+        val safe = sanitizeDiagnosticText(message, MAX_DIAGNOSTIC_LINE_CHARS)
+        if (safe.isEmpty()) return
+        val line = DiagnosticLogLine(level, safe, System.currentTimeMillis())
+        mutableDiagnostics.update { it.copy(coreLogs = it.coreLogs.appendBounded(line)) }
+    }
+
+    internal fun publishDiagnosticLogStream(generation: Long, active: Boolean) {
+        if (generation < latestGeneration.get()) return
+        mutableDiagnostics.update { it.copy(logStreamActive = active) }
+    }
+
+    internal fun publishStatusStream(generation: Long, active: Boolean) {
+        synchronized(trafficLock) {
+            trafficAccumulator.setStatusStreamActive(generation, active)?.let {
+                mutableSessionStats.value = it
+            }
+        }
+    }
+
+    internal fun publishTraffic(
+        generation: Long,
+        uploadDelta: Long,
+        downloadDelta: Long,
+        uploadTotal: Long,
+        downloadTotal: Long,
+    ) {
+        synchronized(trafficLock) {
+            trafficAccumulator.updateTraffic(
+                generation,
+                uploadDelta,
+                downloadDelta,
+                uploadTotal,
+                downloadTotal,
+            )?.let { mutableSessionStats.value = it }
+        }
+    }
+
+    internal fun publishExternalIp(generation: Long, externalIp: String?) {
+        synchronized(trafficLock) {
+            trafficAccumulator.updateExternalIp(generation, externalIp)?.let {
+                mutableSessionStats.value = it
+            }
+        }
+    }
+
+    internal fun publishPing(generation: Long, pingMillis: Long?) {
+        synchronized(trafficLock) {
+            trafficAccumulator.updatePing(generation, pingMillis)?.let {
+                mutableSessionStats.value = it
+            }
+        }
+    }
+
+    internal fun clearConnectionIdentity(generation: Long) {
+        synchronized(trafficLock) {
+            trafficAccumulator.clearConnectionIdentity(generation)?.let {
+                mutableSessionStats.value = it
+            }
+        }
+    }
+
+    fun consumeMessage() {
+        mutableMessage.value = null
+    }
+
+    private fun updateDiagnosticConnectionState(
+        generation: Long,
+        state: VpnConnectionState,
+    ) {
+        when (state) {
+            is VpnConnectionState.Starting -> mutableDiagnostics.update { current ->
+                if (generation > current.generation) {
+                    current.copy(
+                        generation = generation,
+                        lastFailure = null,
+                        coreLogs = emptyList(),
+                        logStreamActive = false,
+                        network = null,
+                        vpnPolicy = null,
+                        effectiveOverlay = null,
+                    )
+                } else {
+                    current
+                }
+            }
+            is VpnConnectionState.Error -> {
+                val safe = sanitizeDiagnosticText(state.message, 360)
+                val now = System.currentTimeMillis()
+                val failure = DiagnosticFailure(
+                    type = DiagnosticFailureClassifier.classify(safe),
+                    message = safe,
+                    occurredAtEpochMillis = now,
+                )
+                val line = DiagnosticLogLine(level = 2, message = safe, receivedAtEpochMillis = now)
+                mutableDiagnostics.update {
+                    it.copy(
+                        generation = generation,
+                        lastFailure = failure,
+                        applicationLogs = it.applicationLogs.appendBounded(line),
+                        logStreamActive = false,
+                    )
+                }
+            }
+            VpnConnectionState.Stopped,
+            is VpnConnectionState.Stopping,
+            -> publishDiagnosticLogStream(generation, false)
+            is VpnConnectionState.Connected -> Unit
+        }
+    }
+
+    private fun appendApplicationDiagnosticLog(level: Int, message: String) {
+        if (message.isEmpty()) return
+        val line = DiagnosticLogLine(level, message.take(MAX_DIAGNOSTIC_LINE_CHARS), System.currentTimeMillis())
+        mutableDiagnostics.update {
+            it.copy(applicationLogs = it.applicationLogs.appendBounded(line))
+        }
+    }
+
+    private fun sanitizeDiagnosticText(message: String, maxLength: Int): String =
+        SecretRedactor.redactInline(message)
+            .replace(NEW_LINES, " ")
+            .trim()
+            .take(maxLength)
+
+    private companion object {
+        const val MAX_DIAGNOSTIC_LINE_CHARS = 600
+        val NEW_LINES = Regex("[\\r\\n]+")
+    }
+}

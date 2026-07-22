@@ -1,0 +1,317 @@
+package io.github.zapretkvn.android.config
+
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.boolean
+import kotlinx.serialization.json.contentOrNull
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Test
+import io.github.zapretkvn.android.routing.InstalledRuleSets
+import io.github.zapretkvn.android.routing.ManagedRoutingRule
+import io.github.zapretkvn.android.routing.RoutingConfigEditor
+import io.github.zapretkvn.android.routing.RoutingMatchType
+import io.github.zapretkvn.android.routing.RoutingPreset
+import io.github.zapretkvn.android.routing.RoutingRuleAction
+
+class RuntimeConfigBuilderTest {
+    @Test
+    fun `runtime copy owns logging packages and managed interrupt without mutating source`() {
+        val stored = validConfig(
+            tunExtra = """
+                ,"include_package":["stored.include"]
+            """.trimIndent(),
+            rootExtra = """
+                ,"log":{"level":"trace","output":"/sdcard/secret.log","timestamp":true}
+                ,"extended_unknown":{"keep":42}
+            """.trimIndent(),
+        )
+
+        val result = RuntimeConfigBuilder.build(stored, enableTrafficStats = true) as RuntimeConfigResult.Ready
+        val runtime = JsonConfig.parse(result.json) as JsonObject
+        val tun = ((runtime["inbounds"] as JsonArray).single() as JsonObject)
+        val log = runtime["log"] as JsonObject
+        val selector = (runtime["outbounds"] as JsonArray)
+            .map { it as JsonObject }
+            .first { it.string("tag") == ConfigAnalyzer.MANAGED_SELECTOR_TAG }
+        val experimental = runtime["experimental"] as JsonObject
+
+        assertFalse("include_package" in tun)
+        assertFalse("exclude_package" in tun)
+        assertEquals("warn", (log["level"] as JsonPrimitive).content)
+        assertFalse("output" in log)
+        assertTrue((log["timestamp"] as JsonPrimitive).boolean)
+        assertTrue((selector["interrupt_exist_connections"] as JsonPrimitive).boolean)
+        assertTrue(experimental["clash_api"] is JsonObject)
+        assertFalse(
+            "managed traffic manager must not open an external listener",
+            "external_controller" in (experimental["clash_api"] as JsonObject),
+        )
+        assertEquals(42, ((((runtime["extended_unknown"] as JsonObject)["keep"]) as JsonPrimitive).content.toInt()))
+        assertTrue("stored profile must stay untouched", "stored.include" in stored)
+        assertTrue("stored profile must keep log output", "/sdcard/secret.log" in stored)
+    }
+
+    @Test
+    fun `managed runtime removes every external Clash listener field without mutating source`() {
+        val stored = validConfig(
+            rootExtra = """
+                ,"experimental":{"clash_api":{
+                  "external_controller":"0.0.0.0:9090",
+                  "external_controller_tls":"0.0.0.0:9443",
+                  "secret":"controller-secret",
+                  "external_ui":"ui",
+                  "external_ui_download_url":"https://example.test/ui.zip",
+                  "external_ui_download_detour":"direct",
+                  "access_control_allow_origin":["*"],
+                  "access_control_allow_private_network":true
+                }}
+            """.trimIndent(),
+        )
+
+        val result = RuntimeConfigBuilder.build(stored, enableTrafficStats = true) as RuntimeConfigResult.Ready
+        val experimental = (JsonConfig.parse(result.json) as JsonObject)["experimental"] as JsonObject
+        val clash = experimental["clash_api"] as JsonObject
+
+        assertTrue(clash.isEmpty())
+        assertTrue("0.0.0.0:9090" in stored)
+        assertTrue("controller-secret" in stored)
+    }
+
+    @Test
+    fun `valid full dual stack config produces runtime json`() {
+        val runtime = RuntimeConfigBuilder.build(validConfig()) as RuntimeConfigResult.Ready
+        val root = JsonConfig.parse(runtime.json) as JsonObject
+
+        assertFalse("release runtime must not synthesize a traffic manager", "experimental" in root)
+    }
+
+    @Test
+    fun `zero and two tun inbounds are rejected`() {
+        val zero = validConfig().replace(
+            """"inbounds":[{"type":"tun","tag":"tun-in","address":["172.19.0.1/30","fdfe:dcba:9876::1/126"],"auto_route":true}]""",
+            """"inbounds":[]""",
+        )
+        val two = validConfig().replace(
+            """"inbounds":[""",
+            """"inbounds":[{"type":"tun","address":["10.0.0.1/30","fd00::1/126"],"auto_route":true},""",
+        )
+
+        assertTrue(RuntimeConfigBuilder.build(zero) is RuntimeConfigResult.Invalid)
+        assertTrue(RuntimeConfigBuilder.build(two) is RuntimeConfigResult.Invalid)
+    }
+
+    @Test
+    fun `partial or single stack routes are rejected`() {
+        val singleStack = validConfig().replace(
+            """["172.19.0.1/30","fdfe:dcba:9876::1/126"]""",
+            """["172.19.0.1/30"]""",
+        )
+        val partial = validConfig(
+            tunExtra = """, "route_address":["10.0.0.0/8","::/0"]""",
+        )
+
+        assertTrue(RuntimeConfigBuilder.build(singleStack) is RuntimeConfigResult.Invalid)
+        assertTrue(RuntimeConfigBuilder.build(partial) is RuntimeConfigResult.Invalid)
+    }
+
+    @Test
+    fun `package conflict route exclusion and forbidden dial fields are rejected`() {
+        val conflict = validConfig(
+            tunExtra = """, "include_package":["a"], "exclude_package":["b"]""",
+        )
+        val excluded = validConfig(
+            tunExtra = """, "route_exclude_address":["192.168.0.0/16"]""",
+        )
+        val routeSet = validConfig(
+            tunExtra = """, "route_address_set":["private"]""",
+        )
+        val forbidden = validConfig().replace(
+            """"type":"direct","tag":"direct"""",
+            """"type":"direct","tag":"direct","routing_mark":7""",
+        )
+
+        assertTrue(RuntimeConfigBuilder.build(conflict) is RuntimeConfigResult.Invalid)
+        assertTrue(RuntimeConfigBuilder.build(excluded) is RuntimeConfigResult.Invalid)
+        assertTrue(RuntimeConfigBuilder.build(routeSet) is RuntimeConfigResult.Invalid)
+        assertTrue(RuntimeConfigBuilder.build(forbidden) is RuntimeConfigResult.Invalid)
+    }
+
+    @Test
+    fun `raw profile keeps explicit log level but never writes runtime log to disk`() {
+        val raw = validConfig(rootExtra = """, "log":{"level":"error","output":"runtime.log"}""")
+            .replace("\"tag\":\"zapret-proxy\"", "\"tag\":\"user-selector\"")
+            .replace("\"final\":\"zapret-proxy\"", "\"final\":\"user-selector\"")
+        val runtime = RuntimeConfigBuilder.build(raw) as RuntimeConfigResult.Ready
+        val log = (JsonConfig.parse(runtime.json) as JsonObject)["log"] as JsonObject
+
+        assertEquals("error", (log["level"] as JsonPrimitive).content)
+        assertFalse("output" in log)
+    }
+
+    @Test
+    fun `auto route and auto interface detection are mandatory`() {
+        val noAutoRoute = validConfig().replace("\"auto_route\":true", "\"auto_route\":false")
+        val noAutoInterface = validConfig().replace(
+            "\"auto_detect_interface\":true",
+            "\"auto_detect_interface\":false",
+        )
+
+        assertTrue(RuntimeConfigBuilder.build(noAutoRoute) is RuntimeConfigResult.Invalid)
+        assertTrue(RuntimeConfigBuilder.build(noAutoInterface) is RuntimeConfigResult.Invalid)
+    }
+
+    @Test
+    fun `managed Android DNS is a runtime-only zapret overlay`() {
+        val stored = validConfig(rootExtra = ",\"unknown_dns_owner\":true")
+        val result = RuntimeConfigBuilder.build(
+            stored,
+            options = RuntimeConfigOptions(dnsMode = DnsMode.Android),
+        ) as RuntimeConfigResult.Ready
+        val root = JsonConfig.parse(result.json) as JsonObject
+        val dns = root["dns"] as JsonObject
+        val servers = dns["servers"] as JsonArray
+        val routeRules = ((root["route"] as JsonObject)["rules"] as JsonArray)
+
+        assertEquals(listOf("zapret-android-dns"), servers.map { (it as JsonObject).string("tag") })
+        assertEquals("zapret-android-dns", (dns["final"] as JsonPrimitive).content)
+        assertTrue(routeRules.any { (it as JsonObject).string("action") == "hijack-dns" })
+        assertTrue((root["unknown_dns_owner"] as JsonPrimitive).boolean)
+        assertFalse("stored JSON must not be rewritten", "zapret-android-dns" in stored)
+    }
+
+    @Test
+    fun `secure DNS uses real IP sequential fallback and no fakeip`() {
+        val result = RuntimeConfigBuilder.build(
+            validConfig(),
+            options = RuntimeConfigOptions(dnsMode = DnsMode.Secure),
+        ) as RuntimeConfigResult.Ready
+        val root = JsonConfig.parse(result.json) as JsonObject
+        val dns = root["dns"] as JsonObject
+        val servers = (dns["servers"] as JsonArray).map { it as JsonObject }
+        val fallback = servers.first { it.string("tag") == "zapret-secure-dns" }
+
+        assertEquals("sequential", fallback.string("strategy"))
+        assertEquals("1.1.1.1", servers.first { it.string("tag") == "zapret-doh-1" }.string("server"))
+        assertFalse(servers.any { it.string("type") == "fakeip" })
+        assertEquals("4096", (dns["cache_capacity"] as JsonPrimitive).content)
+        assertTrue((dns["reverse_mapping"] as JsonPrimitive).boolean)
+    }
+
+    @Test
+    fun `automatic DNS mirrors direct domain rules and final proxy`() {
+        val stored = validConfig().replace(
+            "\"auto_detect_interface\":true,\"final\":\"zapret-proxy\"",
+            "\"auto_detect_interface\":true,\"rules\":[{\"domain_suffix\":[\".ru\"],\"action\":\"route\",\"outbound\":\"direct\"}],\"final\":\"zapret-proxy\"",
+        )
+        val result = RuntimeConfigBuilder.build(
+            stored,
+            options = RuntimeConfigOptions(dnsMode = DnsMode.Automatic),
+        ) as RuntimeConfigResult.Ready
+        val dns = (JsonConfig.parse(result.json) as JsonObject)["dns"] as JsonObject
+        val rules = (dns["rules"] as JsonArray).map { it as JsonObject }
+        val ru = rules.first { it["domain_suffix"]?.toString()?.contains(".ru") == true }
+
+        assertEquals("zapret-android-dns", ru.string("server"))
+        assertEquals("zapret-secure-dns", (dns["final"] as JsonPrimitive).content)
+    }
+
+    @Test
+    fun `automatic DNS mirrors managed domain set but not IP-only set`() {
+        val routed = RoutingConfigEditor.apply(
+            raw = validConfig(),
+            preset = RoutingPreset.BypassLan,
+            manualRules = listOf(
+                ManagedRoutingRule(
+                    RoutingMatchType.DomainSuffix,
+                    listOf(".direct.example"),
+                    RoutingRuleAction.Direct,
+                ),
+                ManagedRoutingRule(
+                    RoutingMatchType.IpCidr,
+                    listOf("192.0.2.0/24"),
+                    RoutingRuleAction.Direct,
+                ),
+            ),
+            installed = InstalledRuleSets(1, emptyMap()),
+        ).json
+        val runtime = RuntimeConfigBuilder.build(
+            routed,
+            options = RuntimeConfigOptions(dnsMode = DnsMode.Automatic),
+        ) as RuntimeConfigResult.Ready
+
+        assertTrue(runtime.json.contains("zapret-user-domainsuffix-"))
+        val dns = (JsonConfig.parse(runtime.json) as JsonObject)["dns"] as JsonObject
+        val dnsText = (dns["rules"] as JsonArray).toString()
+        assertTrue(dnsText.contains("zapret-user-domainsuffix-"))
+        assertFalse(dnsText.contains("zapret-user-ipcidr-"))
+    }
+
+    @Test
+    fun `LKG overlay changes only selected server outbound in runtime`() {
+        val stored = validConfig().replace(
+            "{\"type\":\"direct\",\"tag\":\"server-a\"}",
+            "{\"type\":\"vless\",\"tag\":\"server-a\",\"server\":\"vpn.example\",\"server_port\":443,\"uuid\":\"00000000-0000-4000-8000-000000000000\",\"tls\":{\"enabled\":true,\"server_name\":\"vpn.example\"}}",
+        )
+        val result = RuntimeConfigBuilder.build(
+            stored,
+            options = RuntimeConfigOptions(
+                bootstrapHost = BootstrapHostOverlay("server-a", "vpn.example", listOf("203.0.113.10")),
+            ),
+        ) as RuntimeConfigResult.Ready
+        val root = JsonConfig.parse(result.json) as JsonObject
+        val server = (root["outbounds"] as JsonArray)
+            .map { it as JsonObject }
+            .first { it.string("tag") == "server-a" }
+
+        assertEquals("vpn.example", server.string("server"))
+        assertEquals("zapret-bootstrap-lkg", server.string("domain_resolver"))
+        assertFalse("stored profile must stay untouched", "domain_resolver" in stored)
+    }
+
+    @Test
+    fun `managed DNS rejects IPv4 tun without room for internal resolver`() {
+        val slash32 = validConfig().replace("172.19.0.1/30", "172.19.0.1/32")
+        val result = RuntimeConfigBuilder.build(
+            slash32,
+            options = RuntimeConfigOptions(dnsMode = DnsMode.Automatic),
+        )
+
+        assertTrue(result is RuntimeConfigResult.Invalid)
+        assertTrue((result as RuntimeConfigResult.Invalid).message.contains("/30"))
+    }
+
+    @Test
+    fun `Android DNS works for direct-only raw profile without selector`() {
+        val directOnly = validConfig()
+            .replace(
+                "{\"type\":\"selector\",\"tag\":\"zapret-proxy\",\"outbounds\":[\"server-a\"],\"default\":\"server-a\"},",
+                "",
+            )
+            .replace("\"final\":\"zapret-proxy\"", "\"final\":\"direct\"")
+        val result = RuntimeConfigBuilder.build(
+            directOnly,
+            options = RuntimeConfigOptions(dnsMode = DnsMode.Android),
+        )
+
+        assertTrue(result is RuntimeConfigResult.Ready)
+    }
+
+    private fun validConfig(
+        tunExtra: String = "",
+        rootExtra: String = "",
+    ): String = """
+        {
+          "inbounds":[{"type":"tun","tag":"tun-in","address":["172.19.0.1/30","fdfe:dcba:9876::1/126"],"auto_route":true$tunExtra}],
+          "outbounds":[
+            {"type":"direct","tag":"server-a"},
+            {"type":"selector","tag":"zapret-proxy","outbounds":["server-a"],"default":"server-a"},
+            {"type":"direct","tag":"direct"}
+          ],
+          "route":{"auto_detect_interface":true,"final":"zapret-proxy"}
+          $rootExtra
+        }
+    """.trimIndent()
+}

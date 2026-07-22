@@ -1,0 +1,529 @@
+# Zapret KVN Android — план реализации
+
+> Рабочий TODO-лист проекта. Отмечать выполненное заменой `[ ]` на `[x]` только после прохождения указанного gate. Архитектурные решения здесь не переопределяются: источник истины — [главная архитектура](ARCHITECTURE.md), [DNS ADR](DNS_ARCHITECTURE.md), [Routing ADR](ROUTING_ARCHITECTURE.md) и [политика форматов импорта](IMPORT_FORMATS.md).
+
+| Поле | Значение |
+|---|---|
+| Статус | Этапы 0–7 и automated Gate 8 реализованы; внешний release/signing setup и физическая матрица остаются открыты |
+| Текущий этап | Этап 8: обязательная выпускная матрица |
+| Минимальная ОС | Android 8.0, API 26 |
+| Устройства MVP | Телефоны |
+| Ядро | `sing-box-extended` `v1.13.14-extended-2.5.2` |
+| Commit ядра | `ff11f007ec798136a5de258f947a4f34011a37ea` |
+| Модули | Только `app` |
+
+## Как вести план
+
+- Выполнять этапы по порядку; внутри этапа допустимы небольшие независимые задачи.
+- Не отмечать gate по факту компиляции: требуются перечисленные тесты и сохранённый результат.
+- Баг, блокирующий gate, добавлять прямо под соответствующим этапом как `- [ ] BUG-...`.
+- Решение, меняющее TUN, DNS, routing, хранение или источник истины, сначала вносить в соответствующий ADR.
+- Не добавлять новый слой, dependency, service, process или фоновую задачу «на будущее».
+- После этапа обновлять строку «Текущий этап» и раздел «Текущее состояние» внизу.
+
+## Зафиксировано до начала кода
+
+- [x] Принята одномодульная архитектура без Room, Hilt, WebView и WorkManager.
+- [x] Разделены Android per-app scope и sing-box destination routing.
+- [x] Зафиксированы один process, один `VpnService`, один TUN и один libbox instance.
+- [x] Зафиксирована DNS-архитектура без FakeIP и с managed `fallback/sequential`.
+- [x] Зафиксирована маршрутизация `proxy` / `direct` / `reject` через настоящий JSON.
+- [x] Зафиксирован точный commit ядра.
+- [x] Подготовлены и проверены 6/6 эталонных JSON.
+- [x] Пройден `go test ./dns/... ./route/rule ./experimental/libbox`.
+- [ ] До первой публичной сборки выбрать окончательные `applicationId`, namespace и имя signing key.
+- [x] Для production rule-set зафиксированы источники, лицензии, commit и SHA-256 списков.
+
+## Definition of Done MVP
+
+MVP готов только когда выполнены все пункты:
+
+- [ ] Новый пользователь устанавливает APK, импортирует VLESS/другой поддержанный URI или JSON, выбирает приложения и подключается без ручного редактирования JSON.
+- [ ] Невыбранное контрольное приложение не попадает в TUN и продолжает работать напрямую.
+- [ ] Выбранное приложение проходит правила `proxy/direct/reject`, DNS и IPv4/IPv6 без утечек и циклов.
+- [ ] При сломанном сервере или DNS TUN полностью закрывается, обычная сеть восстанавливается.
+- [ ] Импорт, GUI-редактирование и backup не теряют неизвестные extended-поля JSON.
+- [ ] Пройдены fixture, unit, instrumented, lifecycle, redaction, update и energy release-gates.
+- [ ] Release APK содержит ядро нужного commit, подписан постоянным ключом и опубликован с SHA-256.
+
+## Этап 0 — каркас и воспроизводимая сборка
+
+Цель: минимальный устанавливаемый APK и CI, доказывающий происхождение ядра.
+
+### Репозиторий и Android
+
+- [x] `I0-01` Инициализировать Git-репозиторий и добавить `.gitignore`, `LICENSE`, `README.md`.
+- [x] `I0-02` Создать Gradle wrapper и один модуль `app`; Kotlin, Compose и Material 3, minSdk 26.
+- [x] `I0-03` Зафиксировать версии AGP/Kotlin/JDK; не добавлять convention plugins и version catalog без реальной необходимости.
+- [x] `I0-04` Создать `ZapretApplication`, ручной `AppContainer`, `MainActivity` и четыре нижние вкладки-заглушки.
+- [x] `I0-05` Реализовать системную светлую/тёмную тему, Dynamic Color на API 31+ и встроенную палитру на API 26–30.
+- [x] `I0-06` Добавить базовый manifest с минимальными разрешениями; не запрашивать `WAKE_LOCK` и `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`.
+- [x] `I0-07` Добавить debug/release build types, R8 и resource shrinking для release.
+
+
+### Ядро и CI
+
+- [x] `I0-08` Добавить скрипт сборки libbox AAR и audit CLI из полного pinned SHA.
+- [x] `I0-09` Проверять, что HEAD исходника и embedded revision CLI равны pinned SHA.
+- [x] `I0-10` Выбрать ABI MVP после пробной сборки: release — только `arm64-v8a`; `x86_64` подтверждённо нужен внутри build AAR для instrumented-тестов эмулятора и отсекается release `abiFilters`.
+- [x] `I0-11` В CI запускать `sing-box check` для всех файлов `testdata/**/*.json`.
+- [x] `I0-12` В CI запускать pinned Go tests и Android unit tests.
+- [x] `I0-13` Собирать debug APK в GitHub Actions и сохранять core version/revision рядом с artifact.
+- [x] `I0-14` Добавить license/NOTICE для приложения, sing-box-extended и включённых библиотек.
+
+### Gate 0
+
+- [x] Чистый checkout одной командой собирает debug APK.
+- [x] APK устанавливается и открывает четыре вкладки на API 26 и современной версии Android.
+- [ ] CI подтверждает exact core revision и принимает 6/6 fixtures.
+- [x] В release manifest нет запрещённых разрешений, второго process или второго VPN service.
+
+## Этап 1 — профили и настоящий JSON
+
+Цель: импортировать, безопасно хранить, редактировать и проверять JSON без VPN.
+
+- [x] `I1-01` Создать пакеты `profiles/`, `config/`, `importer/` внутри `app`, без отдельных Gradle-модулей.
+- [x] `I1-02` Реализовать `ProfileStore`: `files/profiles/index.json`, `<id>.json`, одна `<id>.json.bak` через `AtomicFile`.
+- [x] `I1-03` Хранить в index только UI metadata; DNS, routes и outbounds остаются исключительно в JSON профиля.
+- [x] `I1-04` Реализовать атомарные create/read/update/delete/restore операции и очистку orphan temp-файлов.
+- [x] `I1-05` Реализовать импорт raw JSON из системного file picker и буфера после явного нажатия.
+- [x] `I1-06` Вызывать libbox `CheckConfig()` до сохранения изменённого профиля и показывать понятную ошибку.
+- [x] `I1-07` Реализовать JSON-tree editor на `kotlinx.serialization.json`, сохраняющий неизвестные поля.
+- [x] `I1-08` Сделать простой raw editor: моноширинный текст, поиск, format, validate, отмена несохранённых изменений.
+- [x] `I1-09` Добавить список профилей, выбор активного профиля, переименование, удаление с подтверждением и восстановление backup.
+- [x] `I1-10` Хранить тему, активный профиль и UI-настройки в DataStore; не копировать туда сетевую конфигурацию.
+- [x] `I1-11` Реализовать `ManagedProfileFactory`: маленькие base/protocol/selector builders вместо набора полноразмерных JSON-шаблонов.
+- [x] `I1-12` Для одиночной ссылки создавать один server outbound и selector `zapret-proxy`; для subscription — несколько server outbounds в том же selector.
+- [x] `I1-13` Генерировать уникальные стабильные server tags без credentials; при совпадении имён добавлять детерминированный suffix.
+- [x] `I1-14` Сохранять выбранный сервер только в `selector.default` настоящего JSON; не использовать DataStore или `experimental.cache_file`.
+- [x] `I1-15` Анализировать raw JSON: показывать существующие selector-группы без скрытой нормализации; managed `zapret-proxy` создавать только после явного выбора пользователя.
+- [x] `I1-16` Хранить профили только в app-private storage и выключить Android Auto Backup для файлов с credentials.
+
+### Тесты и Gate 1
+
+- [x] Unit: JSON round-trip и GUI edit сохраняют неизвестные extended-поля.
+- [x] Unit: сбой записи оставляет старый профиль читаемым; backup восстанавливается.
+- [x] Unit: malformed JSON не изменяет существующий профиль.
+- [x] Unit: index не содержит DNS/outbound/route objects или credentials.
+- [x] Unit + native instrumented: managed single/multi-server builders проходят `CheckConfig()` и имеют валидные ссылки selector → server tags.
+- [x] Unit: смена `selector.default` не изменяет остальные outbounds, DNS, routes и unknown fields.
+- [x] Instrumented: file picker и clipboard import работают на API 26 и современной ОС.
+- [x] Gate: пользователь может импортировать JSON, проверить, изменить, перезапустить приложение и получить тот же профиль.
+
+## Этап 2 — минимальный рабочий VPN
+
+Цель: один профиль и выбранное приложение реально проходят через один TUN/libbox.
+
+### Per-app scope
+
+- [x] `I2-01` Реализовать глобальный include allowlist в DataStore.
+- [x] `I2-02` Создать полноэкранный picker приложений: поиск, установленные пользовательские приложения, скрытые системные.
+- [x] `I2-03` Добавить встроенные suggestions для Instagram, YouTube, Telegram, WhatsApp, Discord, Signal и популярных браузеров; без TikTok.
+- [x] `I2-04` Не запускать VPN при пустой allowlist, исчезнувшем package или ошибке `addAllowedApplication()`.
+- [x] `I2-05` Внутренне включать package Zapret KVN для health-check, не показывая его как пользовательский выбор.
+
+### Service и libbox
+
+- [x] `I2-06` Создать один foreground `VpnService`, `VpnController` и закрытый набор состояний подключения.
+- [x] `I2-07` Реализовать один service-lock, generation token и идемпотентный `stop()`.
+- [x] `I2-08` Интегрировать libbox в том же Android process; вызвать `Libbox.SetMemoryLimit(false)`.
+- [x] `I2-09` Настроить release `Debug=false`, managed `log.level=warn`, `LogMaxLines=256`, без runtime-лога на диск.
+- [x] `I2-10` Реализовать минимальный platform adapter: TUN PFD, `protect(fd)`, package owner lookup и platform callbacks.
+- [x] `I2-11` Перед запуском очищать package include/exclude только в runtime-копии JSON и применять одну глобальную allowlist.
+- [x] `I2-12` Валидировать один TUN, IPv4+IPv6 full routes, `auto_route`, package conflicts и запрещённые bind/mark/netns-поля.
+- [x] `I2-13` Выполнять `CheckConfig()` до `VpnService.Builder.establish()`.
+- [x] `I2-14` Реализовать foreground notification только с состоянием и действиями открыть/остановить; без live speed.
+- [x] `I2-15` При revoke/error/stop закрывать core, PFD, callbacks, streams и foreground notification ровно один раз.
+- [x] `I2-16` Получать selector-группы/текущий server через libbox и переключать активный server вызовом `CommandClient.SelectOutbound()` без restart TUN/core.
+- [x] `I2-17` Перед switch собрать JSON с новым `selector.default`, выполнить `CheckConfig()` и атомарно сохранить; при ошибке runtime switch сделать один контролируемый restart.
+- [x] `I2-18` Для managed selector включить `interrupt_exist_connections=true`; проверить, что закрываются только proxy-соединения selector, а `direct` и приложения вне TUN не затрагиваются.
+
+### Тесты и Gate 2
+
+- [x] Instrumented: выбранное приложение видно в TUN; контрольный невыбранный UID не виден и работает напрямую.
+- [x] Instrumented: проверены IPv4, IPv6, TCP, UDP и реальный Hysteria2/QUIC transport.
+- [x] Instrumented: `protect(fd) == false`, revoke и ошибка после `establish()` приводят к полному stop.
+- [x] Instrumented: ноль/два TUN, partial routes и конфликт package list отклоняются до подключения.
+- [ ] Instrumented: server switch меняет внешний IP без пересоздания TUN; после restart остаётся выбранный server.
+- [x] Leak test: после 20 connect/stop нет роста PFD/threads/libbox instances; TUN, adapters и callbacks закрываются в каждом цикле.
+- [x] Gate: минимальный JSON-профиль подключается на API 26 и современной ОС, а невыбранный трафик не создаёт per-packet работу приложения.
+
+## Этап 3 — DNS, bootstrap и сетевой lifecycle
+
+Цель: соединение либо полностью работает, либо полностью закрывается без сломанного DNS Android.
+
+- [x] `I3-01` Реализовать `DefaultNetworkMonitor` для underlying non-VPN network без polling.
+- [x] `I3-02` Реализовать bootstrap resolver: `DnsResolver` на API 29+, `Network.getAllByName()` на API 26–28.
+- [x] `I3-03` Реализовать маленький LKG cache адреса proxy: fresh 24 часа, аварийный срок до 7 дней, исходное имя сохранять для TLS/Reality SNI.
+- [x] `I3-04` Детектировать Private DNS off/automatic/strict через `LinkProperties`; системную настройку никогда не менять.
+- [x] `I3-05` Реализовать четыре режима GUI: Автоматически, DNS Android, Защищённый через VPN, Из JSON.
+- [x] `I3-06` Создать `RuntimeConfigBuilder`, который добавляет только `zapret-*` overlays и не меняет сохранённый JSON.
+- [x] `I3-07` В managed Auto/Secure использовать реальные IP, `reverse_mapping`, cache 4096 и DoH `fallback/sequential`; FakeIP не создавать.
+- [x] `I3-08` Брать внутренний DNS через `TunOptions.GetDNSServerAddress()` и передавать его в `VpnService.Builder.addDnsServer()`.
+- [x] `I3-09` Перехватывать стандартный DNS правилом port 53 / `hijack-dns`; не обещать перехват DoT, встроенного DoH и mDNS.
+- [x] `I3-10` При strict Private DNS блокировать managed Auto/Secure до `establish()`; DNS Android разрешать только при active+validated strict, иначе fail-close без plaintext fallback; «Из JSON» не переписывать.
+- [x] `I3-11` Реализовать последовательный health pipeline: proxy socket, DNS через TUN, один HTTPS probe.
+- [x] `I3-12` Показывать «Подключено» только после всех проверок; любая ошибка закрывает TUN.
+- [x] `I3-13` При смене сети или DNS/captive policy state обновлять underlying Network, сбрасывать transport и выполнять один контролируемый restart с debounce/generation token.
+- [x] `I3-14` Не добавлять периодический health-check, бесконечный retry или plaintext DNS fallback.
+- [x] `I3-15` Кнопку «Очистить DNS-кэш» реализовать контролируемым restart core, честно не обещая очистить Android resolver cache.
+
+### Тесты и Gate 3
+
+- [x] Unit/core: четыре DNS fixtures проходят exact CLI; JVM-тест подтверждает managed `fallback/sequential` без FakeIP.
+- [x] Core: воспроизводимый тест внутри exact pinned package проверяет success, transport error, hang с общим context и `NXDOMAIN`/`SERVFAIL`/`REFUSED` без ошибочного fallback.
+- [x] Instrumented на AVD API 28/29/36: Private DNS off/automatic/strict working/strict broken; managed Auto/Secure блокируются до TUN, а поломка strict Android DNS во время активной сессии event-driven закрывает TUN без plaintext fallback.
+- [x] Instrumented на AVD: реальные Wi-Fi, mobile, Wi-Fi ↔ mobile и IPv6; один контролируемый restart на каждую смену; captive-portal fail-close покрыт детерминированной fault injection до TUN.
+- [ ] Physical lab: настоящий captive portal и IPv6-only/NAT64 на целевых устройствах/сетях.
+- [x] Instrumented: блокировка системного resolver с fresh/stale/no LKG; реальный managed DoH/proxy success, отказ обоих DoH при недоступном proxy и полная очистка lifecycle.
+- [ ] Physical lab: повторить blocked system DNS/LKG и DoH failure на реальной Wi-Fi/mobile сети, а не только через детерминированную fault injection.
+- [x] Instrumented: мёртвый внутренний DNS после TUN закрывает core/PFD; Android немедленно получает обычную non-VPN сеть и снова разрешает DNS.
+- [ ] Gate: вся матрица DNS ADR проходит, активный TUN никогда не остаётся с неработающим DNS.
+
+## Этап 4 — маршрутизация и rule-set
+
+Цель: один понятный UI управляет destination routing внутри настоящего JSON.
+
+- [x] `I4-01` Реализовать экран из карточек «Область VPN», «Правило трафика» и читаемый «Итог».
+- [x] `I4-02` Реализовать presets: Всё через VPN, Обход LAN, Только выбранные сайты, Россия напрямую, Россия через VPN, Пользовательский.
+- [x] `I4-03` Реализовать действия правила: Через VPN, Напрямую, Блокировать.
+- [x] `I4-04` Соблюдать порядок exact reject → direct exceptions → proxy rules → final.
+- [x] `I4-05` Не генерировать package route rules для обычной allowlist: Android уже выполнил это отсечение.
+- [x] `I4-06` Поставлять локальные binary `.srs` внутри APK с manifest, version, license и SHA-256.
+- [x] `I4-07` Реализовать согласованное domain block: DNS `reject` + route `reject`; IP/CIDR block: route `reject`.
+- [x] `I4-08` Не включать global sniff, legacy GeoIP/Geosite, remote managed rule-set или Android route exclusions.
+- [x] `I4-09` Реализовать advanced include/exclude mode с явным предупреждением; пустой exclude-list блокирует запуск.
+- [x] `I4-10` Дать GUI-редактор основных domain/IP/rule-set/outbound полей, редкое оставить raw JSON.
+- [x] `I4-11` После каждой GUI-операции показывать effective summary и diff управляемых `zapret-*` объектов.
+
+### Тесты и Gate 4
+
+- [x] Core/fixture: `ru-rule-set.json` и `block-rule.json` проходят exact CLI.
+- [x] Instrumented: RU/non-RU domain и IPv4/IPv6 во всех presets.
+- [x] Instrumented: selected app получает proxy/direct/reject; unselected app всегда остаётся вне TUN.
+- [x] Instrumented: приложение со встроенным DoH демонстрирует задокументированное ограничение domain-only block.
+- [x] Performance: измерить cold start, lookup CPU/RAM и размер production `.srs`.
+- [x] Gate: UI summary, effective JSON и реальный сетевой путь совпадают для каждого preset.
+
+Gate 4 закрыт автоматизированно 22 июля 2026 года на AVD API 26 и 36. Все шесть presets прошли реальный TUN-путь через локальный SOCKS5 proxy/direct/reject для RU/non-RU domain и IPv4/IPv6; отдельный UID-тест подтвердил, что невыбранное приложение остаётся вне TUN. Стандартный DNS block и HTTPS DoH→numeric path воспроизводят документированную границу domain-only block. UI summary, сохранённый JSON и фактический outbound совпали для каждого preset.
+
+Exact pinned core загрузил два `.srs` за 1 114 мкс при 758 624 байтах allocations; lookup benchmark — 329 нс/op, 1 104 B/op, 2 allocs/op. Суммарный размер assets — 50 089 байт. В полном debug-прогоне API 36: extraction 2 мс, cold connect 41 мс, 40 реальных flows — 100 мс CPU и +356 КиБ PSS; API 26: 5 мс, 63 мс, 300 мс CPU и без роста PSS. Это закрывает автоматизированный performance-пункт, но не release-gate энергии на физических устройствах.
+
+## Этап 5 — ссылки, QR и подписки
+
+Цель: основной пользователь импортирует конфигурацию без знания JSON.
+
+- [x] `I5-01` Реализовать единый `ImportParser` без отдельной внутренней модели маршрутизации.
+- [x] `I5-02` Поддержать обычный sing-box JSON и subscription, возвращающий JSON.
+- [x] `I5-03` Поддержать URI-листы минимум VLESS, VMess, Trojan, Shadowsocks, Hysteria2 и TUIC; каждый результат преобразовывать сразу в sing-box JSON.
+- [x] `I5-04` Поддержать plain/base64 subscription со списком известных URI; неизвестную строку не угадывать.
+- [x] `I5-05` Добавить URL import и ручное обновление subscription groups с preview до сохранения.
+- [x] `I5-06` Добавить QR scanner только по действию пользователя; камера запрашивается в момент открытия.
+- [x] `I5-07` Добавить импорт из буфера только после нажатия и импорт файла через системный picker.
+- [x] `I5-08` После успешного импорта не подключаться автоматически: предложить выбрать приложения, затем явную кнопку подключения.
+- [x] `I5-09` Перед запуском сканировать импортированный JSON на `urltest`, NTP, remote rule-set, external Clash controller, verbose log и explicit keepalive.
+- [x] `I5-10` Показывать одно предупреждение о фоновой/внешней активности; пользовательский JSON скрыто не очищать.
+- [x] `I5-11` Маскировать UUID, password, token, subscription query и URL credentials во всех preview/log/error.
+- [x] `I5-12` Не добавлять фоновое обновление подписок или ядра.
+- [x] `I5-13` При subscription refresh сохранять выбранный server tag, если он остался; иначе выбрать первый доступный и явно сообщить пользователю.
+- [x] `I5-14` Активный профиль после ручного refresh перезапускать только после подтверждения пользователя; не менять работающий server скрыто.
+- [x] `I5-15` Для одиночного URI предлагать «Новый профиль» или «Добавить в существующую managed-группу»; никогда не сливать профили автоматически.
+
+### Отложенные форматы импорта
+
+- [x] `F-IMPORT-01` Проверить спрос и корректную семантику Clash YAML. Реальный спрос и риск silent field loss подтверждены; точный core parser не экспортирован в libbox, поэтому второй YAML-конвертер не входит в MVP. Решение и gate зафиксированы в [политике форматов](IMPORT_FORMATS.md#f-import-01--clash-yaml).
+- [x] `F-IMPORT-02A` Сверить URI inventory точного ядра. Единственный отсутствующий URI из pinned parser — Hysteria v1; это кандидат, а не реализованная поддержка.
+- [ ] `F-IMPORT-02` Собрать и проанализировать реальные неподдержанные ссылки: минимум 3 обезличенных Hysteria v1 URI и образцы пробелов текущих VLESS/SS/TUIC/Hysteria2 parser; затем выбрать по данным.
+- [ ] `F-IMPORT-03` Добавлять Clash YAML только после полного gate из [политики форматов](IMPORT_FORMATS.md#f-import-01--clash-yaml); не импортировать Clash DNS/routes/groups.
+
+Здесь `[x]` у исследовательского пункта означает завершённый аудит, а не
+наличие формата в APK.
+
+### Тесты и Gate 5
+
+- [x] Golden tests для каждого URI, IPv6 host, percent/base64 encoding, transport, TLS, Reality и пустых/битых полей.
+- [x] Fuzz/property tests: parser не падает и не зависает на произвольном вводе.
+- [x] Integration: subscription update атомарен; битый ответ не меняет старые профили.
+- [ ] Security: секреты отсутствуют в Logcat, crash message, notification и redacted export.
+- [ ] Gate: путь URL/QR/clipboard/file → preview → JSON → выбор приложений → connect работает без raw editor.
+
+Открытая часть Gate 5 требует реальной камеры/HTTPS subscription endpoint и физического
+устройства. Redacted export из `I6-15`–`I6-16` теперь проверен instrumented-тестом:
+профиль, package list, endpoint, UUID/password/token и внешний IP в отчёт не попадают.
+Полный security-gate всё ещё требует проверки Logcat/crash/notification на физическом
+устройстве. Автотестами также подтверждены parser/preview, native `CheckConfig`,
+атомарный malformed refresh и общая redaction ошибок/debug core log.
+
+## Этап 6 — продуктовый UI и диагностика
+
+Цель: компактный Material You клиент, пригодный для ежедневного использования.
+
+### Главная и состояние
+
+- [x] `I6-01` Реализовать компактную connection card: состояние, профиль, сервер, IP, ping и время.
+- [x] `I6-01A` По нажатию на сервер открывать bottom sheet selector-группы с именем, протоколом, endpoint, session ping и отметкой текущего выбора.
+- [x] `I6-02` Использовать внутренний libbox traffic manager без external controller/listener.
+- [x] `I6-03` Подписывать `CommandStatus` с интервалом 1 секунда только пока главная в lifecycle `STARTED`.
+- [x] `I6-04` Хранить 60 download/upload значений в кольцевом массиве текущей сессии.
+- [x] `I6-05` Никогда не включать `CommandConnections`; `CommandLog` открывать только на экране диагностики.
+- [x] `I6-06` IP запрашивать один раз после connect, ping — при connect и вручную.
+- [x] `I6-07` Уведомление не обновлять каждую секунду и не рисовать там скорость.
+
+Главная и диагностика проверены 22 июля 2026 года: 85/85 JVM и текущие 67/67
+instrumented на AVD API 36; базовая матрица 66/66 также пройдена на API 26/29.
+Постоянным остаётся только event-driven `CommandGroup`;
+`CommandStatus` создаётся при видимой главной, а отдельный `CommandLog` — только при
+видимой диагностике. Оба клиента физически закрываются при уходе с соответствующего
+экрана. `CommandConnections` отсутствует во всём приложении.
+
+### Остальные экраны
+
+- [x] `I6-08` Завершить Профили: группы, source, last update, add actions и ошибки.
+- [x] `I6-09` Завершить Маршрутизацию: две карточки, rules, app picker, advanced JSON.
+- [x] `I6-10` Завершить Настройки: тема, DNS, Stable/Beta, Диагностика, Сообщество, О приложении.
+- [x] `I6-11` Разместить Telegram-ссылки только в «Настройки → Сообщество».
+- [x] `I6-12` Добавить accessibility labels, нормальный back navigation, состояния loading/empty/error и крупные touch targets.
+- [x] `I6-13` Ограничить анимации стандартными Compose/Material; не добавлять тяжёлый dashboard.
+
+Остальные экраны завершены 22 июля 2026 года без нового слоя навигации, DI или
+зависимостей. Профили группируются только по UI metadata и показывают источник и
+`updated_at`; сетевой JSON остаётся единственным источником истины. Маршрутизация
+имеет две главные карточки: Android per-app scope и destination routing, а кнопка
+«Расширенный JSON» открывает активный настоящий профиль. Stable/Beta хранится как
+UI-настройка и не запускает фоновые обновления; updater остаётся этапом 7.
+
+Три Telegram URL присутствуют в production-коде только внутри экрана
+«Настройки → Сообщество». Подэкраны настроек, picker приложений и JSON-редактор
+обрабатывают системный Back; интерактивные строки имеют минимум 56–72 dp и
+понятные semantics. Собственных бесконечных/тяжёлых анимаций нет — используются
+только штатные состояния Compose/Material. Проверено в общей матрице: 85/85 JVM,
+67/67 instrumented tests на API 36 и базовые 66/66 на API 26/29. Основные кнопки соединения имеют
+явный минимум 48 dp; этот инвариант и подписи нижней навигации проверяются smoke-тестом.
+
+### Диагностика
+
+- [x] `I6-14` Показывать короткий тип ошибки и раскрываемые последние bounded log lines.
+- [x] `I6-15` Создавать redacted diagnostic JSON только по действию пользователя.
+- [x] `I6-16` Экспортировать через Android Sharesheet/FileProvider и удалять временный файл при следующем запуске.
+- [x] `I6-17` Включать core/app version, Android/API, network state, Private DNS mode и effective overlay без секретов.
+
+Диагностика не добавляет постоянного фонового сборщика. `CommandLog` подписывается
+отдельным клиентом только при `Activity STARTED` и открытом экране, хранит в памяти
+не более 80 видимых redacted-строк текущего запуска и закрывается идемпотентно вместе
+с экраном/service. Runtime-лог на диск не пишется. Effective overlay — структурная
+сводка managed `zapret-*`: режим DNS, наличие dual-stack TUN, типы managed DNS,
+количество правил/actions и локальные rule-set без endpoint, match values или секретов.
+
+Отчёт версии 1 создаётся только кнопкой, содержит app/core revision, Android/API,
+VPN/non-VPN network state, Private DNS, последнюю классифицированную ошибку, безопасный
+overlay и bounded log lines. Он не содержит raw JSON, имя профиля, packages, внешний IP
+или credentials. Единственный временный файл находится в `cache/diagnostics/`, доступен
+через `FileProvider` с `exported=false` и read grant Sharesheet, а `AppContainer` удаляет
+его при следующем запуске.
+
+### Тесты и Gate 6
+
+- [x] Compose UI tests для всех состояний главной и четырёх вкладок.
+- [x] Lifecycle test: после ухода с главной status ticker закрыт; после ухода из диагностики log stream закрыт.
+- [x] Rotation/process recreation не создаёт второй service/core и не теряет фактическое состояние VPN.
+- [x] Accessibility smoke test на светлой/тёмной теме и API 26/31+.
+- [x] Gate: полный путь «установил → импортировал → выбрал → подключил → диагностировал» не требует JSON.
+
+Автоматизированный Gate 6 закрыт 22 июля 2026 года на AVD API 26 и API 36. UI-тесты
+покрывают отсутствие профиля/приложений и состояния `Stopped`, `Starting`, `Connected`,
+`Stopping`, `Error`, а также основные экраны всех четырёх вкладок. В светлой и тёмной
+темах проверены accessibility labels нижней навигации и touch targets не меньше 48 dp.
+
+Полный сценарий использует обычную Shadowsocks-ссылку из буфера: создаёт managed JSON
+через preview, выбирает установленное приложение, поднимает настоящий Android TUN и
+libbox, переживает rotation с тем же `connectedAt` и единственным core, затем открывает
+диагностику. Сетевой health-result в тесте детерминирован, поэтому сценарий не зависит
+от внешнего VPN-сервера, но profile parser, native `CheckConfig`, service, TUN и libbox
+не подменяются. Raw JSON editor нигде не открывается.
+
+Отдельный `scripts/verify-process-recreation.sh` проверяет hard process death. Android
+в этом случае закономерно уничтожает service/TUN/core; новый процесс обязан показать
+фактическое `Stopped` с нулевыми ресурсами, а следующее подключение — создать ровно один
+service/core/TUN. Probe receiver существует только в debug source set, защищён системным
+`android.permission.DUMP`, а CI дополнительно запрещает его присутствие в release APK.
+
+## Этап 7 — обновление APK и выпуск
+
+Цель: безопасный GitHub Release без динамического ядра и мусора.
+
+- [x] `I7-01` Реализовать ручную проверку GitHub Releases для Stable/Beta.
+- [x] `I7-02` Скачать APK во внутренний cache, проверить опубликованный SHA-256 и передать системному installer.
+- [x] `I7-03` Проверять package name и совместимость подписи; не обещать silent install.
+- [x] `I7-04` Удалять незавершённые APK и diagnostic temp-файлы при следующем запуске.
+- [x] `I7-05` Никогда не скачивать core отдельно: libbox обновляется только вместе с APK.
+- [x] `I7-06` Настроить release workflow: exact core SHA → CLI/AAR → tests → APK → checksum → metadata.
+- [ ] `I7-07` Хранить signing secrets только в GitHub Secrets; сделать зашифрованную офлайн-копию ключа и инструкции восстановления.
+- [x] `I7-08` Публиковать release notes с app version, core tag, full core SHA, ABI и checksum.
+- [x] `I7-09` Проверить same-key upgrade с предыдущей версией и сохранение профилей/DataStore.
+
+Updater запускается только кнопкой и не имеет scheduler/service. Stable использует latest
+не-prerelease, Beta — самый новый опубликованный stable или prerelease. Release считается
+валидным только при единственном `release-metadata.json`, заявленном arm64 APK и отдельном
+`APK.sha256`; metadata, checksum и GitHub asset digest обязаны совпасть. Разрешены только
+HTTPS-хосты GitHub с ограниченными redirect/размером/таймаутом.
+
+После загрузки Android читает сам APK: package должен совпасть с установленным, versionCode
+должен быть строго больше, versionName/versionCode — совпасть с metadata, minSdk — подходить,
+а текущий сертификат — входить в доказанную signing history нового APK. Для multi-signer
+требуется точное равенство набора. Только после этих проверок non-exported FileProvider
+передаёт content URI штатному installer; silent install не используется. Частичный, битый,
+отменённый или оставшийся после process restart APK удаляется из `cache/updates`.
+
+Release workflow принимает строгие tags `vMAJOR.MINOR.PATCH` и `-beta.N`, выводит
+детерминированный монотонный versionCode, собирает exact pinned core, тестирует, подписывает
+arm64 APK секретами environment `release`, проверяет `apksigner`/manifest и публикует APK,
+SHA-256, metadata и notes один раз без замены уже опубликованных assets. Локальная сборка
+этого bundle пройдена с одноразовым тестовым ключом.
+
+`I7-07` остаётся внешним действием владельца: workflow и [инструкция](SIGNING.md) готовы,
+но настоящий постоянный ключ, две зашифрованные офлайн-копии и GitHub Secrets невозможно
+создать честно без выбранного владельцем ключа и доступа к репозиторию.
+
+### Gate 7
+
+- [x] Неверный checksum, другая подпись, прерванная загрузка и downgrade обрабатываются безопасно.
+- [x] После update/cancel/restart cache не содержит старых APK.
+- [x] Release APK воспроизводимо содержит указанный core revision.
+- [ ] GitHub Release содержит APK, SHA-256 и достаточную информацию для независимой проверки.
+
+Автоматизированный Gate 7 пройден на AVD API 26/36. `scripts/verify-same-key-upgrade.sh`
+установил build 701001, записал настоящий профиль/DataStore/allowlist, обновил тем же ключом
+до 701002 и подтвердил сохранность. Затем Android отклонил downgrade и переподписанный
+другим ключом APK как `VERSION_DOWNGRADE`/`UPDATE_INCOMPATIBLE`, не повредив данные.
+Unit/instrumented тесты отдельно проверяют rotation lineage, multi-signer, package/version,
+неверный checksum, прерванный `.part`, installer cancel и startup cleanup. Последний пункт
+Gate остаётся внешним до первого фактически опубликованного GitHub Release.
+
+## Этап 8 — обязательная выпускная матрица
+
+Цель: доказать работу на Android, а не только корректность схемы и JVM/Go-кода.
+
+### Устройства и сеть
+
+- [ ] `R8-01` Реальное слабое устройство API 26/28.
+- [x] `R8-02` Android 10/API 29 AVD: `DnsResolver`, Private DNS boundary и 66/66 tests.
+- [x] `R8-03` Современный Android API 36 AVD: 66/66 tests; физическое устройство остаётся в energy/OEM gate.
+- [ ] `R8-04` Wi-Fi, cellular, IPv4, IPv6/NAT64, captive portal и смена сети.
+- [x] `R8-05` Always-on/Lockdown читается через public API 29+, объясняется до TUN и не включается приложением.
+
+### Корректность
+
+- [ ] `R8-06` Повторить полную DNS matrix из DNS ADR.
+- [ ] `R8-07` Повторить routing matrix из Routing ADR.
+- [ ] `R8-08` Проверить каждый заявленный outbound отдельно на connect, UDP/QUIC и `protect(fd)` loop.
+- [ ] `R8-09` Проверить shared UID, удалённый package, пустые include/exclude и revoke.
+- [x] `R8-10` 100 connect/stop и 50 Wi-Fi/mobile transitions пройдены на API 29/36 AVD без deadlock, duplicate restart и утечек.
+
+Протокол и честная граница automated/physical прогона зафиксированы в
+[`GATE8_RESULTS.md`](GATE8_RESULTS.md). `R8-01`, полный `R8-04`, `R8-06…R8-09`
+остаются открытыми до реальных устройств/сетей/серверов.
+
+### CPU, память и батарея
+
+- [ ] `R8-11` Пять повторов: VPN off baseline и VPN idle с погашенным экраном. API 36 AVD 5/5 пройден; физическая energy-часть открыта.
+- [ ] `R8-12` Невыбранное приложение передаёт фиксированный объём без пропорционального CPU/network роста Zapret KVN. На AVD 8 MiB дали median TUN=0; физический OEM-повтор открыт.
+- [ ] `R8-13` Сравнить выбранный `direct` и `proxy`: CPU, throughput, RSS/PSS, GC и энергия. AVD CPU/throughput/RSS/PSS готовы; реальные proxy, GC trace и энергия открыты.
+- [ ] `R8-14` Сравнить главную видимую/закрытую и diagnostics открыта/закрыта. Настоящие Compose-экраны AVD измерены; физическая энергия открыта.
+- [ ] `R8-15` Сравнить managed DNS `sequential` с контрольным `parallel` на уникальных именах. AVD 5×12 готов; физическая энергия/сети открыты.
+- [ ] `R8-16` Сравнить текущий `mixed` stack с `system`; AVD-разница ниже 5%, default не изменён; физическая матрица открыта.
+- [ ] `R8-17` Сравнить default MTU и альтернативу; AVD-разница ниже 5%, default 9000 не изменён; оператор/OEM открыт.
+- [ ] `R8-18` Сравнить `SetMemoryLimit(false)` с экспериментальным GC=10: AVD CPU/PSS/RSS/throughput ниже порога; Go GC count/pause, OOM и физическая энергия открыты.
+- [x] `R8-19` Harness сохраняет System Trace, batterystats и 130 raw-файлов с SHA-256; manual CI загружает их artifact. Физические PowerMetric/ODPM входят в открытые R8-11…R8-18.
+- [x] `R8-20` Порог 5% применяется агрегатором и проверяется negative/positive self-test в `verify-project.sh`.
+
+Точный AVD-протокол и граница оставшейся физической проверки находятся в
+[`GATE8_RESULTS.md`](GATE8_RESULTS.md). Harness дополнительно прошёл сокращённую матрицу
+5 × 16 на API 26; это только проверка minSdk-совместимости, не energy evidence. Ни один
+production default по AVD-данным не изменён.
+
+### Security и release candidate
+
+- [x] `R8-21` Secrets проверяются до export во внутреннем bounded-log, в redacted export,
+  foreground notification и app-private temp/history после явного чтения clipboard; stale diagnostics/APK
+  очищаются отдельными тестами. Уведомление принимает только закрытый enum состояний.
+- [x] `R8-22` Managed runtime удаляет все listener/UI/secret поля `experimental.clash_api`,
+  не меняя сохранённый JSON. Явный raw user JSON остаётся под контролем пользователя.
+- [x] `R8-23` Exact merged-manifest audit проверяет permission allowlist, все exported-компоненты,
+  signature-permission AndroidX, FileProvider, backup/cleartext/process/VPN contract и `Debug=false`.
+- [x] `R8-24` Arm64 release проверяет APK/R8 mapping и exact native symbols; minified x86_64
+  release на API 36 прошёл 5 cold starts (median 407 ms) без process crash.
+- [ ] `R8-25` Локальный minified RC прошёл clean install, same-key update, downgrade/signature
+  rejection. Последняя галочка остаётся за APK, подписанным постоянным release key на реальном
+  устройстве непосредственно перед публикацией.
+
+### Финальный gate
+
+- [x] Нет failed fixture, unit или instrumented test: exact/compat fixtures 6/6,
+  JVM 85/85, API 36 instrumented 67/67; API 26/29 baseline также пройден.
+- [ ] Нет core revision/ABI/signature mismatch. Exact core и arm64 ABI проверены; временная
+  подпись прошла same-key/foreign-key/downgrade tests. Нужна последняя проверка APK,
+  подписанного постоянным production key, на реальном arm64-устройстве.
+- [x] Нет app-owned WakeLock, alarm/job, скрытого polling или бесконечного reconnect.
+  CI проверяет manifest и production sources; разрешён только lifecycle ticker видимой
+  главной и одноразовый debounce смены сети.
+- [x] Managed idle не создаёт периодический сетевой трафик: 5/5 окон дали 0 UID RX+TX
+  и 0 status/log clients; физическая energy-матрица остаётся отдельным R8 gate.
+- [x] Невыбранный трафик не проходит через TUN/libbox: 5 × 8 MiB дали 0 UID RX+TX
+  Zapret KVN и median 0 TUN bytes (единственный интерфейсный шум — 96 bytes).
+- [x] Все известные ограничения синхронно перечислены в UI, README и генерируемых
+  release notes; это проверяет `scripts/verify-project.sh`.
+- [ ] После прохождения gate опубликован первый production GitHub Release. Тестовые debug
+  pre-release не закрывают этот пункт.
+
+Публичный gate пока намеренно не закрыт: обязательны production signing key, реальный
+arm64 RC и незавершённая физическая матрица из `GATE8_RESULTS.md`. В локальном Git также
+ещё нет commit и `origin`, поэтому цель GitHub Release не может быть выбрана без решения
+владельца репозитория.
+
+## После MVP — только по измерениям и запросам пользователей
+
+Эти пункты не входят в текущий final gate и не реализуются «на всякий случай». Галочка
+означает не наличие кода, а прохождение указанного ниже отдельного activation gate.
+
+- [ ] `F-01` Whole-app block как третье состояние приложения. Активировать после первого
+  release и явного продуктового запроса; реализовывать как узкое `package_name → reject`
+  внутри TUN, не смешивая с Android include/exclude boundary.
+- [ ] `F-02` Clash YAML import. Требуется полный gate из `IMPORT_FORMATS.md`: libbox binding
+  либо отдельное обоснованное решение о parser, минимум 10 реальных образцов и доказанное
+  отсутствие silent field loss. DNS/routes/groups из Clash автоматически не сливать.
+- [ ] `F-03` Планшетный/navigation rail layout. Активировать только после возврата планшетов
+  в product scope и UI/accessibility matrix на compact/medium/expanded width.
+- [ ] `F-04` Выбор `mixed/system` stack в GUI. AVD-разница ниже 5%; оставить upstream
+  `mixed`, пока физические API 26/современный Android не покажут устойчивый выигрыш или
+  несовместимость хотя бы одного режима.
+- [ ] `F-05` Настройка MTU. AVD не выявил причины менять default 9000; добавлять настройку
+  только для воспроизводимой OEM/operator проблемы с IPv4, IPv6/NAT64, QUIC или PMTU.
+- [ ] `F-06` Patch owner/process lookup. Сначала P4 benchmark текущего core и отдельной
+  экспериментальной сборки на реальных устройствах; требуются существенный повторяемый
+  выигрыш, собственный patch hash и полный regression/release matrix.
+- [ ] `F-07` FakeIP. Только явно экспериментальный режим с отдельной ADR: per-profile
+  ranges/cache identity, очистка при stop/delete/network change и тесты, исключающие
+  сохранение FakeIP вне TUN. Managed default остаётся без FakeIP.
+- [ ] `F-08` Remote rule-set updater. Только после подтверждённого сценария, политики
+  лицензий/version/SHA/rollback и явного ручного UX; не добавлять скрытый worker/polling и
+  не объединять с APK updater.
+
+## Текущее состояние
+
+- [x] Архитектурный аудит завершён 22 июля 2026 года.
+- [x] Exact CLI: 6/6 fixtures.
+- [x] Compatibility CLI: 6/6 fixtures.
+- [x] Go packages compile/tests pass; дополнительный audit test временно встраивается в exact pinned fallback package и проверяет success/error/hang/RCODE.
+- [x] Markdown fences, локальные ссылки и SHA-256 fixtures проверены.
+- [x] Android/Gradle-проект создан.
+- [x] Debug и R8 release APK собраны.
+- [x] Runtime smoke пройден на эмуляторах API 26 и API 36.
+- [x] Повторный аудит I0-08–I0-14: exact origin/tag/SHA, рекурсивные fixtures, arm64 release и pinned CI actions.
+- [x] JVM unit tests: 85/85; добавлены GitHub updater/signing, security и Always-on/Lockdown policy.
+- [x] Android instrumented tests: текущие 67/67 пройдены на API 36; базовые 66/66 — на API 26/29, security delta 3/3 — на API 26.
+- [x] Hard process recreation: `scripts/verify-process-recreation.sh` пройден на API 26/36; после смерти процесса ноль session/core/TUN/callback/client, после нового connect ровно один экземпляр.
+- [x] Packaged `.srs`: exact CLI RU/non-RU domain/IPv4/IPv6, manifest/license/SHA, atomic repair; 50 089 байт, cold install 14 мс на AVD API 36.
+- [x] Routing lookup/cold-start CPU/RAM measurements выполнены на AVD API 26/36 и exact core benchmark.
+- [ ] Idle CPU/battery release-gate выполнен на физических устройствах.
+
+**Следующее действие:** владелец выбирает окончательные applicationId/репозиторий и постоянный signing key по `SIGNING.md`, создаёт GitHub environment/secrets и две офлайн-копии. Затем выполняются первый внешний Actions/Release и физическая матрица этапа 8: captive portal, IPv6-only/NAT64, камера/HTTPS subscription, blocked-DNS/LKG/DoH, OEM per-app/routing и энергия.

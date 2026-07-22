@@ -1,0 +1,87 @@
+package io.github.zapretkvn.android
+
+import android.content.Context
+import io.github.zapretkvn.android.config.LibboxConfigValidator
+import io.github.zapretkvn.android.diagnostics.DiagnosticExporter
+import io.github.zapretkvn.android.vpn.BootstrapCache
+import io.github.zapretkvn.android.vpn.BootstrapResolver
+import io.github.zapretkvn.android.importer.AndroidImportReader
+import io.github.zapretkvn.android.importer.HttpSubscriptionFetcher
+import io.github.zapretkvn.android.importer.SubscriptionSourceStore
+import io.github.zapretkvn.android.profiles.ProfileStore
+import io.github.zapretkvn.android.profiles.ProfilesViewModel
+import io.github.zapretkvn.android.routing.RuleSetAssetManager
+import io.github.zapretkvn.android.routing.RoutingViewModel
+import io.github.zapretkvn.android.ui.UiSettingsStore
+import io.github.zapretkvn.android.updates.UpdateController
+import io.github.zapretkvn.android.vpn.AndroidPackageAvailability
+import io.github.zapretkvn.android.vpn.AppCatalog
+import io.github.zapretkvn.android.vpn.AppSelectionStore
+import io.github.zapretkvn.android.vpn.AppsViewModel
+import io.github.zapretkvn.android.vpn.LibboxRuntime
+import io.github.zapretkvn.android.vpn.VpnAppScopePreflight
+import io.github.zapretkvn.android.vpn.VpnController
+import io.github.zapretkvn.android.vpn.ProxyBootstrapper
+import io.github.zapretkvn.android.vpn.VpnHealthPipeline
+import java.io.File
+
+class AppContainer(context: Context) {
+    val appContext: Context = context.applicationContext
+    val libboxRuntime = LibboxRuntime(appContext)
+    val configValidator = LibboxConfigValidator()
+    val profileStore = ProfileStore(
+        root = File(appContext.filesDir, "profiles"),
+        validator = configValidator,
+    )
+    val uiSettingsStore = UiSettingsStore(appContext)
+    val importReader = AndroidImportReader(appContext)
+    val subscriptionFetcher = HttpSubscriptionFetcher()
+    val subscriptionSourceStore = SubscriptionSourceStore(
+        File(appContext.noBackupFilesDir, "subscriptions"),
+    )
+    val appSelectionStore = AppSelectionStore(appContext)
+    val appCatalog = AppCatalog(appContext)
+    val vpnAppScopePreflight = VpnAppScopePreflight(
+        ownPackageName = appContext.packageName,
+        packageAvailability = AndroidPackageAvailability(appContext.packageManager),
+    )
+    val vpnController = VpnController(appContext)
+    val diagnosticExporter = DiagnosticExporter(
+        context = appContext,
+        settingsStore = uiSettingsStore,
+        vpnController = vpnController,
+    ).also(DiagnosticExporter::cleanupStaleFiles)
+    val updateController = UpdateController(
+        context = appContext,
+        repository = BuildConfig.UPDATE_REPOSITORY,
+        currentVersionName = BuildConfig.VERSION_NAME,
+        currentVersionCode = BuildConfig.VERSION_CODE.toLong(),
+    )
+    val bootstrapCache = BootstrapCache(File(appContext.noBackupFilesDir, "network"))
+    val ruleSetAssetManager = RuleSetAssetManager(appContext)
+    val proxyBootstrapper = ProxyBootstrapper(BootstrapResolver(), bootstrapCache)
+    val vpnHealthPipeline = VpnHealthPipeline(appContext)
+
+    val profilesViewModelFactory: ProfilesViewModel.Factory
+        get() = ProfilesViewModel.Factory(
+            profileStore,
+            uiSettingsStore,
+            configValidator,
+            importReader,
+            subscriptionFetcher,
+            subscriptionSourceStore,
+            vpnController,
+            bootstrapCache,
+        )
+
+    val appsViewModelFactory: AppsViewModel.Factory
+        get() = AppsViewModel.Factory(appSelectionStore, appCatalog)
+
+    val routingViewModelFactory: RoutingViewModel.Factory
+        get() = RoutingViewModel.Factory(
+            profileStore,
+            uiSettingsStore,
+            ruleSetAssetManager,
+            vpnController,
+        )
+}

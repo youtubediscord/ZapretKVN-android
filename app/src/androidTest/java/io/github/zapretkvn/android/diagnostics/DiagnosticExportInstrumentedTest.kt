@@ -1,0 +1,107 @@
+package io.github.zapretkvn.android.diagnostics
+
+import android.content.Intent
+import android.content.pm.PackageManager
+import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
+import io.github.zapretkvn.android.BuildConfig
+import io.github.zapretkvn.android.ZapretApplication
+import io.github.zapretkvn.android.config.JsonConfig
+import io.github.zapretkvn.android.vpn.PrivateDnsMode
+import io.github.zapretkvn.android.vpn.UnderlyingNetworkState
+import io.github.zapretkvn.android.vpn.VpnConnectionState
+import io.github.zapretkvn.android.vpn.VpnSystemPolicy
+import java.io.File
+import kotlinx.coroutines.runBlocking
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertTrue
+import org.junit.Test
+import org.junit.runner.RunWith
+
+@RunWith(AndroidJUnit4::class)
+class DiagnosticExportInstrumentedTest {
+    @Test
+    fun reportIsExplicitRedactedShareableAndCleanable() = runBlocking {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val container = (context.applicationContext as ZapretApplication).container
+        val exporter = container.diagnosticExporter
+        val directory = File(context.cacheDir, DiagnosticExporter.DIRECTORY_NAME)
+        exporter.cleanupStaleFiles()
+        assertFalse("No report may exist before the explicit action", directory.exists())
+
+        val token = container.vpnController.nextGeneration()
+        try {
+            container.vpnController.publish(token, VpnConnectionState.Starting("hidden-profile", "Тест"))
+            container.vpnController.publishDiagnosticNetwork(
+                token,
+                UnderlyingNetworkState(
+                    transport = "wifi",
+                    interfaceName = "wlan0",
+                    metered = false,
+                    validated = true,
+                    privateDnsMode = PrivateDnsMode.Automatic,
+                    privateDnsActive = true,
+                ),
+            )
+            container.vpnController.publishEffectiveOverlay(
+                token,
+                """{"dns_mode":"Automatic","uuid":"123e4567-e89b-12d3-a456-426614174000"}""",
+            )
+            container.vpnController.publishVpnSystemPolicy(
+                token,
+                VpnSystemPolicy(statusAvailable = true, alwaysOn = false, lockdown = false),
+            )
+            container.vpnController.publishCoreDiagnosticLog(
+                token,
+                3,
+                "token=super-secret 123e4567-e89b-12d3-a456-426614174000 com.example.hidden 203.0.113.7",
+            )
+            val inMemoryLogs = container.vpnController.diagnostics.value.logs
+                .joinToString("\n") { it.message }
+            assertFalse("super-secret" in inMemoryLogs)
+            assertFalse("123e4567-e89b-12d3-a456-426614174000" in inMemoryLogs)
+
+            val report = exporter.createReport()
+            JsonConfig.parse(report)
+            assertTrue("\"report_version\": 1" in report)
+            assertTrue(BuildConfig.CORE_COMMIT in report)
+            assertTrue("\"private_dns_mode\"" in report)
+            assertTrue("\"vpn_system_policy\"" in report)
+            assertTrue("\"supported_by_app\": false" in report)
+            assertTrue("\"effective_overlay\"" in report)
+            assertFalse("hidden-profile" in report)
+            assertFalse("super-secret" in report)
+            assertFalse("123e4567-e89b-12d3-a456-426614174000" in report)
+            assertFalse("com.example.hidden" in report)
+            assertFalse("203.0.113.7" in report)
+            assertFalse("allowed_packages" in report)
+            assertFalse(directory.exists())
+
+            val share = exporter.createShareIntent()
+            assertEquals(Intent.ACTION_SEND, share.action)
+            assertEquals("application/json", share.type)
+            assertTrue(share.flags and Intent.FLAG_GRANT_READ_URI_PERMISSION != 0)
+            val uri = share.clipData?.getItemAt(0)?.uri
+            assertNotNull(uri)
+            val sharedReport = context.contentResolver.openInputStream(checkNotNull(uri))
+                ?.bufferedReader()
+                ?.use { it.readText() }
+            assertNotNull(sharedReport)
+            assertFalse("super-secret" in checkNotNull(sharedReport))
+            assertTrue(File(directory, DiagnosticExporter.FILE_NAME).isFile)
+
+            val provider = context.packageManager.resolveContentProvider(
+                "${BuildConfig.APPLICATION_ID}.fileprovider",
+                PackageManager.GET_META_DATA,
+            )
+            assertNotNull(provider)
+            assertFalse(checkNotNull(provider).exported)
+        } finally {
+            exporter.cleanupStaleFiles()
+            container.vpnController.publish(token, VpnConnectionState.Stopped)
+        }
+        assertFalse(directory.exists())
+    }
+}
