@@ -252,7 +252,7 @@ private fun SettingsMain(
                     Column(modifier = Modifier.weight(1f)) {
                         Text("Только IPv4 через VPN")
                         Text(
-                            "Включено по умолчанию. Убирает AAAA для доменов, которые пойдут через proxy, включая режим «DNS Android»; выключите для IPv6-only сайтов. LAN, прямые домены и режим «Из JSON» не меняются.",
+                            "Включено по умолчанию. Убирает AAAA после перехода автоматического режима на DNS Android/DoH; DNS профиля и «Из JSON» не меняются. Выключите для IPv6-only сайтов.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -293,6 +293,8 @@ private fun SettingsMain(
                 Text(
                     if (state.settings.dnsMode == DnsMode.FromJson) {
                         "Сохранено, но не применяется в режиме «Из JSON»."
+                    } else if (state.settings.dnsMode == DnsMode.Automatic) {
+                        "Применяется только после автоматического перехода с DNS профиля на DNS Android или DoH."
                     } else {
                         "Точный домен получает указанный IPv4 до обращения к DNS. Встроенный DoH/DoT приложения может обойти правило."
                     },
@@ -1275,7 +1277,7 @@ private fun DnsMode.displayName(): String = when (this) {
 }
 
 private fun DnsMode.description(): String = when (this) {
-    DnsMode.Automatic -> "Android DNS для bootstrap/LAN, DoH через выбранный proxy для остального."
+    DnsMode.Automatic -> "DNS профиля → DNS Android → DoH. Переход только после подтверждённой ошибки."
     DnsMode.Android -> "Системный resolver и Private DNS Android остаются источником истины."
     DnsMode.Secure -> "Стандартный DNS выбранных приложений идёт в DoH через proxy."
     DnsMode.FromJson -> "DNS-секция профиля запускается без managed-подмены."

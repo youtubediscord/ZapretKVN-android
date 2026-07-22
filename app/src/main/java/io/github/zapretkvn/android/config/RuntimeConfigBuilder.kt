@@ -740,6 +740,7 @@ object RuntimeConfigBuilder {
         ANDROID_DNS_TAG,
         DOH_1_TAG,
         DOH_2_TAG,
+        DOH_3_TAG,
         SECURE_DNS_TAG,
         BOOTSTRAP_DNS_TAG,
         DNS_OVERRIDE_TAG,

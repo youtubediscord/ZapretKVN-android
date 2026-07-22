@@ -392,6 +392,24 @@ class RuntimeConfigBuilderTest {
     }
 
     @Test
+    fun `switching a runtime copy from secure to Android removes every generated DoH`() {
+        val secure = RuntimeConfigBuilder.build(
+            validConfig(),
+            options = RuntimeConfigOptions(dnsMode = DnsMode.Secure),
+        ) as RuntimeConfigResult.Ready
+        val android = RuntimeConfigBuilder.build(
+            secure.json,
+            options = RuntimeConfigOptions(dnsMode = DnsMode.Android),
+        ) as RuntimeConfigResult.Ready
+        val dns = (JsonConfig.parse(android.json) as JsonObject)["dns"] as JsonObject
+        val tags = (dns["servers"] as JsonArray).map { (it as JsonObject).string("tag") }
+
+        assertFalse(tags.any { it?.startsWith("zapret-doh-") == true })
+        assertFalse("zapret-secure-dns" in tags)
+        assertEquals("zapret-android-dns", dns.string("final"))
+    }
+
+    @Test
     fun `automatic DNS mirrors direct domain rules and final proxy`() {
         val stored = validConfig().replace(
             "\"auto_detect_interface\":true,\"final\":\"zapret-proxy\"",

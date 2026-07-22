@@ -779,6 +779,39 @@ class VpnServiceInstrumentedTest {
     }
 
     @Test
+    fun automaticDnsFallsBackOnceFromAndroidToSecureAfterConfirmedDnsFailure() = runBlocking {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val context = instrumentation.targetContext
+        val container = (context.applicationContext as ZapretApplication).container
+        val packageName = context.packageName
+        allowVpn(packageName)
+        shell("settings put global private_dns_mode off")
+        container.appSelectionStore.replaceAllowlist(setOf("com.android.settings"))
+        container.uiSettingsStore.setDnsMode(DnsMode.Automatic)
+        val profile = createProfile(container, "Automatic DNS fallback", TWO_SERVER_DIRECT_CONFIG)
+        try {
+            VpnTestHooks.reset()
+            VpnTestHooks.failNextDnsProbe()
+            val terminal = startAndAwaitTerminal(container.vpnController, profile.id, timeoutMillis = 40_000)
+            assertTrue("Automatic DNS fallback failed: $terminal", terminal is VpnConnectionState.Connected)
+
+            val diagnostics = container.vpnController.diagnostics.value
+            assertTrue(
+                diagnostics.connectionAttempt?.stages.orEmpty().any {
+                    it.key == "dns_fallback_secure" && it.status == DiagnosticStageStatus.Success
+                },
+            )
+            assertTrue(diagnostics.effectiveOverlay.orEmpty().contains("\"dns_mode\": \"Secure\""))
+        } finally {
+            VpnTestHooks.reset()
+            stopIfNeeded(container.vpnController, context)
+            container.uiSettingsStore.setDnsMode(DnsMode.FromJson)
+            container.profileStore.delete(profile.id)
+            denyVpn(packageName)
+        }
+    }
+
+    @Test
     fun captivePortalStopsBeforeTun() = runBlocking {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val context = instrumentation.targetContext

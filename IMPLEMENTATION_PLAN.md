@@ -26,7 +26,7 @@
 - [x] Принята архитектура с одним product-модулем `app` и узкими направленными libraries (`network-bootstrap`, import), без Room, Hilt, WebView и WorkManager.
 - [x] Разделены Android per-app scope и sing-box destination routing.
 - [x] Зафиксированы один process, один `VpnService`, один TUN и один libbox instance.
-- [x] Зафиксирована DNS-архитектура без FakeIP и с managed `fallback/parallel`.
+- [x] Зафиксирована DNS-архитектура без FakeIP: Auto `профиль → Android → DoH`, а `fallback/parallel` используется только внутри защищённого этапа.
 - [x] Зафиксирована маршрутизация `proxy` / `direct` / `reject` через настоящий JSON.
 - [x] Зафиксирован точный commit ядра.
 - [x] Подготовлены и проверены 6/6 эталонных JSON.
@@ -158,10 +158,11 @@ MVP готов только когда выполнены все пункты:
 - [x] `I3-03` Реализовать маленький LKG cache адреса proxy: fresh 24 часа, аварийный срок до 7 дней, исходное имя сохранять для TLS/Reality SNI.
 - [x] `I3-04` Детектировать Private DNS off/automatic/strict через `LinkProperties`; системную настройку никогда не менять.
 - [x] `I3-05` Реализовать четыре режима GUI: Автоматически, DNS Android, Защищённый через VPN, Из JSON.
-- [x] `I3-05A` Добавить включённый по умолчанию «Только IPv4 через VPN»: `ipv4_only` применяется к generated DNS rules proxy-доменов в Auto/Secure/Android DNS, не меняя direct/LAN, TUN IPv6 и режим «Из JSON»; пользователь может вернуть dual-stack, но WireGuard требует настоящий внутренний IPv6-адрес.
+- [x] `I3-05A` Добавить включённый по умолчанию «Только IPv4 через VPN»: `ipv4_only` применяется к generated DNS rules proxy-доменов в Secure/DNS Android и managed-этапах Auto, не меняя первую попытку с DNS профиля, direct/LAN, TUN IPv6 и режим «Из JSON»; пользователь может вернуть dual-stack, но WireGuard требует настоящий внутренний IPv6-адрес.
 - [x] `I3-05B` Добавить одну глобальную редактируемую пару DNS override для managed-режимов, по умолчанию включённую как `ntc.party → 130.255.77.28`: `hosts` и точное правило стоят после `reject`, но до resolver rules; «Из JSON», routing, TLS/SNI и встроенный DoH не меняются, diagnostic не раскрывает пару.
+- [x] `I3-05C` В Auto использовать конечную цепочку `DNS профиля → DNS Android → DoH`: переходить только после typed DNS health failure, полностью закрывать предыдущие core/TUN/callbacks, не переключаться на ошибке JSON/proxy/HTTPS и не давать fallback явным режимам.
 - [x] `I3-06` Создать `RuntimeConfigBuilder`, который добавляет только `zapret-*` overlays и не меняет сохранённый JSON.
-- [x] `I3-07` В managed Auto/Secure использовать реальные IP, `reverse_mapping`, cache 4096 и три DoH (Cloudflare, Google, OpenDNS) через `fallback/parallel`; exact `sequential` не достигает резерва при зависшем основном DoH; FakeIP не создавать.
+- [x] `I3-07` В явном Secure и последнем Auto-этапе использовать реальные IP, `reverse_mapping`, cache 4096 и три DoH (Cloudflare, Google, OpenDNS) через `fallback/parallel`; exact `sequential` не достигает резерва при зависшем основном DoH; FakeIP не создавать.
 - [x] `I3-08` Брать внутренний DNS через `TunOptions.GetDNSServerAddress()` и передавать его в `VpnService.Builder.addDnsServer()`.
 - [x] `I3-09` Перехватывать стандартный DNS правилом port 53 / `hijack-dns`; не обещать перехват DoT, встроенного DoH и mDNS.
 - [x] `I3-10` При strict Private DNS блокировать managed Auto/Secure до `establish()`; DNS Android разрешать только при active+validated strict, иначе fail-close без plaintext fallback; «Из JSON» не переписывать.
@@ -177,6 +178,7 @@ MVP готов только когда выполнены все пункты:
 ### Тесты и Gate 3
 
 - [x] Unit/core: четыре DNS fixtures проходят exact CLI; JVM-тест подтверждает managed `fallback/parallel` без FakeIP.
+- [x] Unit: Auto выбирает DNS профиля, Android и DoH в фиксированном порядке, остаётся bounded и не скрывает non-DNS ошибки; явные режимы имеют ровно одну попытку.
 - [x] Core: воспроизводимый тест внутри exact pinned package проверяет success, transport error, hang с общим context и `NXDOMAIN`/`SERVFAIL`/`REFUSED` без ошибочного fallback.
 - [x] Instrumented на AVD API 28/29/36: Private DNS off/automatic/strict working/strict broken; managed Auto/Secure блокируются до TUN, а поломка strict Android DNS во время активной сессии event-driven закрывает TUN без plaintext fallback.
 - [x] Instrumented на AVD: реальные Wi-Fi, mobile, Wi-Fi ↔ mobile и IPv6; один контролируемый restart на каждую смену; captive-portal fail-close покрыт детерминированной fault injection до TUN.
@@ -191,8 +193,10 @@ Physical Test 17 на Pixel 9 Pro XL (API 37) подтвердил ответ Wi
 ошибки после handshake: `ipv4_only` не применялся к proxy-доменам режима DNS Android;
 `fallback/sequential` не мог перейти к резервному DoH после зависания первого; одиночный
 Google 204 probe давал ложный `VPN-200`, а IPv6-попытка WireGuard-профиля без внутреннего
-IPv6 завершалась `missing IPv6 local address`. Runtime и ADR исправлены; physical
-подтверждение Test 18 остаётся частью открытого Gate 3.
+IPv6 завершалась `missing IPv6 local address`. Test 18 подтвердил WireGuard handshake,
+но реальные логи затем показали блокировку managed DoH и необходимость предпочитать
+уже выбранный DNS профиля. Цепочка Auto исправлена; physical подтверждение Test 21
+остаётся частью открытого Gate 3.
 
 ## Этап 4 — маршрутизация и rule-set
 
@@ -571,17 +575,19 @@ arm64 RC и незавершённая физическая матрица из 
 - [x] Debug и R8 release APK собраны.
 - [x] Runtime smoke пройден на эмуляторах API 26 и API 36.
 - [x] Повторный аудит I0-08–I0-14: exact origin/tag/SHA, рекурсивные fixtures, arm64 release и pinned CI actions.
-- [x] JVM unit tests: 85/85; добавлены GitHub updater/signing, security и Always-on/Lockdown policy.
+- [x] JVM unit tests: 141/141 во всех модулях; добавлены Auto DNS fallback, GitHub updater/signing, security и Always-on/Lockdown policy.
 - [x] Android instrumented tests: текущие 67/67 пройдены на API 36; базовые 66/66 — на API 26/29, security delta 3/3 — на API 26.
 - [x] Hard process recreation: `scripts/verify-process-recreation.sh` пройден на API 26/36; после смерти процесса ноль session/core/TUN/callback/client, после нового connect ровно один экземпляр.
 - [x] Packaged `.srs`: exact CLI RU/non-RU domain/IPv4/IPv6, manifest/license/SHA, atomic repair; 50 089 байт, cold install 14 мс на AVD API 36.
 - [x] Routing lookup/cold-start CPU/RAM measurements выполнены на AVD API 26/36 и exact core benchmark.
 - [x] Test 18 собран локально из commit `e637391` для arm64-v8a, armeabi-v7a и x86_64 и опубликован отдельным GitHub prerelease с SHA-256/metadata.
+- [x] Test 20 опубликован из commit `352fb31` с редактируемым DNS override; Auto DNS fallback в него ещё не входил.
 - [ ] Idle CPU/battery release-gate выполнен на физических устройствах.
 
-**Следующее действие:** установить Test 18 и на том же WireGuard-профиле проверить Auto
-и DNS Android с включённым «Только IPv4 через VPN»; «Из JSON» проверить отдельно как
-неизменённую пользовательскую DNS-политику. После успешного подключения повторить
+**Следующее действие:** установить Test 21 и на том же WireGuard-профиле проверить Auto:
+диагностика должна закончиться на DNS профиля, а при его реальной ошибке показать ровно
+один переход к DNS Android и лишь затем к DoH. «Из JSON» и DNS Android проверить отдельно
+как явные режимы без скрытой подмены. После успешного подключения повторить
 смену Wi‑Fi/mobile и длительную сессию; затем остаются физическая
 матрица этапа 8 (captive portal, IPv6-only/NAT64, камера/HTTPS subscription,
 blocked-DNS/LKG/DoH, OEM per-app/routing и энергия) и production signing key по `SIGNING.md`.

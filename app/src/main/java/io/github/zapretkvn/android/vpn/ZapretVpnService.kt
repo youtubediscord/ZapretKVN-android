@@ -93,6 +93,43 @@ internal object NetworkRestartPolicy {
         }
 }
 
+internal object AutomaticDnsFallbackPolicy {
+    fun candidates(configuredMode: DnsMode, hasProfileDns: Boolean): List<DnsMode> =
+        if (configuredMode == DnsMode.Automatic) {
+            buildList {
+                if (hasProfileDns) add(DnsMode.FromJson)
+                add(DnsMode.Android)
+                add(DnsMode.Secure)
+            }
+        } else {
+            listOf(configuredMode)
+        }
+
+    fun label(mode: DnsMode): String = when (mode) {
+        DnsMode.FromJson -> "DNS профиля"
+        DnsMode.Android -> "DNS Android"
+        DnsMode.Secure -> "защищённый DoH"
+        DnsMode.Automatic -> "автоматический DNS"
+    }
+
+    suspend fun <T> run(
+        candidates: List<DnsMode>,
+        onFallback: (from: DnsMode, to: DnsMode, failure: VpnDnsHealthException) -> Unit,
+        attempt: suspend (DnsMode) -> T,
+    ): T {
+        require(candidates.isNotEmpty())
+        for ((index, candidate) in candidates.withIndex()) {
+            try {
+                return attempt(candidate)
+            } catch (error: VpnDnsHealthException) {
+                if (index == candidates.lastIndex) throw error
+                onFallback(candidate, candidates[index + 1], error)
+            }
+        }
+        error("DNS fallback завершился без результата.")
+    }
+}
+
 class ZapretVpnService : VpnService() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val serviceLock = Mutex()
@@ -219,6 +256,7 @@ class ZapretVpnService : VpnService() {
         profileId: String,
         noCacheLookup: Boolean = false,
         updaterRouting: Boolean = false,
+        runtimeDnsMode: DnsMode? = null,
     ) {
         require(profileId.isNotBlank()) { "Профиль не выбран." }
         val systemPolicy = VpnSystemPolicyDetector.detect(this)
@@ -236,7 +274,11 @@ class ZapretVpnService : VpnService() {
             }
         }
         val uiSettings = container.uiSettingsStore.settings.first()
-        val dnsMode = uiSettings.dnsMode
+        val configuredDnsMode = uiSettings.dnsMode
+        val dnsMode = runtimeDnsMode ?: configuredDnsMode
+        check(dnsMode != DnsMode.Automatic) {
+            "Автоматический DNS должен быть разрешён в один runtime-кандидат до запуска core."
+        }
         val vpnHiding = uiSettings.vpnHiding
         val appSelection = container.appSelectionStore.selection.first()
         val selectedPackages = appSelection.allowedPackages
@@ -291,7 +333,7 @@ class ZapretVpnService : VpnService() {
                     error("Интернет требует авторизации в Wi-Fi.")
                 }
                 if (underlying.privateDnsMode == PrivateDnsMode.Strict &&
-                    (dnsMode == DnsMode.Automatic || dnsMode == DnsMode.Secure)
+                    (configuredDnsMode == DnsMode.Automatic || configuredDnsMode == DnsMode.Secure)
                 ) {
                     error("Strict Private DNS несовместим с этим режимом. Выберите «DNS Android» или «Из JSON».")
                 }
@@ -485,8 +527,43 @@ class ZapretVpnService : VpnService() {
         updaterRouting: Boolean = false,
     ) {
         val completed = withTimeoutOrNull(CONNECTION_START_TIMEOUT_MILLIS) {
-            startLocked(token, profileId, noCacheLookup, updaterRouting)
-            true
+            val configuredMode = container.uiSettingsStore.settings.first().dnsMode
+            container.profileStore.initialize()
+            val hasProfileDns = configuredMode == DnsMode.Automatic &&
+                ConfigAnalyzer.hasProfileDns(container.profileStore.read(profileId).json)
+            val candidates = AutomaticDnsFallbackPolicy.candidates(configuredMode, hasProfileDns)
+            AutomaticDnsFallbackPolicy.run(
+                candidates = candidates,
+                onFallback = { previous, candidate, failure ->
+                    val failureType = generateSequence<Throwable>(failure) { it.cause }
+                        .last()
+                        .javaClass
+                        .simpleName
+                        .take(80)
+                    val detail = "Автоматический DNS: ${AutomaticDnsFallbackPolicy.label(previous)} " +
+                        "не отвечает ($failureType); пробуем ${AutomaticDnsFallbackPolicy.label(candidate)}."
+                    controller.publishDiagnosticWarning(detail)
+                    controller.startConnectionDiagnosticStage(
+                        token,
+                        "dns_fallback_${candidate.name.lowercase()}",
+                        "DNS fallback: ${AutomaticDnsFallbackPolicy.label(candidate)}",
+                    )
+                    controller.publish(
+                        token,
+                        VpnConnectionState.Starting(profileId, detail, updaterRouting),
+                    )
+                },
+                attempt = { candidate ->
+                    startLocked(
+                        token = token,
+                        profileId = profileId,
+                        noCacheLookup = noCacheLookup,
+                        updaterRouting = updaterRouting,
+                        runtimeDnsMode = candidate,
+                    )
+                    true
+                },
+            )
         } == true
         if (!completed) throw ConnectionStartupTimeoutException()
     }
@@ -1081,7 +1158,8 @@ class ZapretVpnService : VpnService() {
     private class RuntimeSwitchException(cause: Throwable) : Exception(cause)
 
     private class ConnectionStartupTimeoutException : Exception(
-        "Подключение не завершилось за 30 секунд. VPN полностью остановлен; повторите после стабилизации сети.",
+        "Подключение не завершилось за ${CONNECTION_START_TIMEOUT_MILLIS / 1_000} секунд. " +
+            "VPN полностью остановлен; повторите после стабилизации сети.",
     ), CodedFailure {
         override val failureCode = "VPN-120"
         override val userMessage = checkNotNull(message)
@@ -1228,7 +1306,7 @@ class ZapretVpnService : VpnService() {
         private const val NOTIFICATION_CHANNEL_ID = "vpn"
         private const val NOTIFICATION_ID = 1001
         private const val NETWORK_RESTART_DEBOUNCE_MILLIS = 750L
-        private const val CONNECTION_START_TIMEOUT_MILLIS = 30_000L
+        private const val CONNECTION_START_TIMEOUT_MILLIS = 45_000L
         private val NEW_LINES = Regex("[\\r\\n\\t]+")
 
         fun startIntent(

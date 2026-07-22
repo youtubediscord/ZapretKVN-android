@@ -26,6 +26,17 @@ data class OutboundDescription(
 object ConfigAnalyzer {
     const val MANAGED_SELECTOR_TAG = "zapret-proxy"
 
+    fun hasProfileDns(raw: String): Boolean = runCatching {
+        val root = JsonConfig.parse(raw) as? JsonObject ?: return@runCatching false
+        val dns = root["dns"] as? JsonObject ?: return@runCatching false
+        val servers = (dns["servers"] as? JsonArray)
+            ?.mapNotNull { (it as? JsonObject)?.string("tag") }
+            .orEmpty()
+        if (servers.isEmpty()) return@runCatching false
+        val final = dns.string("final")
+        final == null || final in servers
+    }.getOrDefault(false)
+
     fun selectorGroups(raw: String): List<SelectorGroup> = selectorGroups(JsonConfig.parse(raw))
 
     fun selectorGroups(root: JsonElement): List<SelectorGroup> {
