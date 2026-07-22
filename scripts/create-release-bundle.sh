@@ -3,8 +3,9 @@ set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TAG="${1:?release tag is required}"
-SOURCE_APK="${2:?signed release APK is required}"
+SOURCE_DIR="${2:?directory containing the signed release APK matrix is required}"
 OUTPUT_DIR="${3:-$PROJECT_ROOT/release-out}"
+RELEASE_ABIS=(arm64-v8a armeabi-v7a x86_64)
 
 # shellcheck disable=SC1090,SC1091
 source "$PROJECT_ROOT/core.properties"
@@ -27,72 +28,137 @@ fi
 : "${ANDROID_HOME:?ANDROID_HOME must point to an installed Android SDK}"
 AAPT2="$ANDROID_HOME/build-tools/$ANDROID_BUILD_TOOLS/aapt2"
 APKSIGNER="$ANDROID_HOME/build-tools/$ANDROID_BUILD_TOOLS/apksigner"
-[[ -x "$AAPT2" && -x "$APKSIGNER" && -f "$SOURCE_APK" ]]
-
-SIGNATURE_INFO="$("$APKSIGNER" verify --verbose --print-certs "$SOURCE_APK")"
-mapfile -t SIGNER_DIGESTS < <(
-    sed -n 's/^Signer #[0-9][0-9]* certificate SHA-256 digest: //p' <<<"$SIGNATURE_INFO"
-)
-[[ "${#SIGNER_DIGESTS[@]}" -eq 1 ]]
-SIGNER_SHA256="$(tr '[:upper:]' '[:lower:]' <<<"${SIGNER_DIGESTS[0]}" | tr -d ':[:space:]')"
-[[ "$SIGNER_SHA256" =~ ^[0-9a-f]{64}$ ]]
-if [[ -n "${ZAPRET_EXPECTED_SIGNER_SHA256:-}" ]]; then
-    EXPECTED_SIGNER="$(tr '[:upper:]' '[:lower:]' <<<"$ZAPRET_EXPECTED_SIGNER_SHA256" | tr -d ':[:space:]')"
-    [[ "$EXPECTED_SIGNER" =~ ^[0-9a-f]{64}$ && "$SIGNER_SHA256" == "$EXPECTED_SIGNER" ]]
-fi
-BADGING="$($AAPT2 dump badging "$SOURCE_APK" | sed -n '1p')"
-[[ "$BADGING" == *"name='io.github.zapretkvn.android'"* ]]
-[[ "$BADGING" == *"versionCode='$ZAPRET_VERSION_CODE'"* ]]
-[[ "$BADGING" == *"versionName='$ZAPRET_VERSION_NAME'"* ]]
+for command in jq sha256sum unzip; do
+    command -v "$command" >/dev/null || { echo "Missing required command: $command" >&2; exit 1; }
+done
+[[ -x "$AAPT2" && -x "$APKSIGNER" && -d "$SOURCE_DIR" ]]
 
 if [[ -d "$OUTPUT_DIR" && -n "$(find "$OUTPUT_DIR" -mindepth 1 -maxdepth 1 -print -quit)" ]]; then
     echo "Release output directory must be empty: $OUTPUT_DIR" >&2
     exit 1
 fi
 mkdir -p "$OUTPUT_DIR"
-APK_NAME="Zapret-KVN-$TAG-arm64-v8a.apk"
-cp "$SOURCE_APK" "$OUTPUT_DIR/$APK_NAME"
-APK_SHA256="$(sha256sum "$OUTPUT_DIR/$APK_NAME" | awk '{print $1}')"
-APK_SIZE="$(stat -c '%s' "$OUTPUT_DIR/$APK_NAME")"
-printf '%s  %s\n' "$APK_SHA256" "$APK_NAME" > "$OUTPUT_DIR/$APK_NAME.sha256"
 
-printf '%s\n' \
-    '{' \
-    '  "schema": 1,' \
-    "  \"version_name\": \"$ZAPRET_VERSION_NAME\"," \
-    "  \"version_code\": $ZAPRET_VERSION_CODE," \
-    '  "application_id": "io.github.zapretkvn.android",' \
-    "  \"core_tag\": \"$CORE_TAG\"," \
-    "  \"core_commit\": \"$CORE_COMMIT\"," \
-    "  \"signer_sha256\": \"$SIGNER_SHA256\"," \
-    '  "abi": ["arm64-v8a"],' \
-    "  \"apk_file\": \"$APK_NAME\"," \
-    "  \"apk_sha256\": \"$APK_SHA256\"," \
-    "  \"apk_size\": $APK_SIZE" \
-    '}' > "$OUTPUT_DIR/release-metadata.json"
+ARTIFACTS=()
+SIGNER_SHA256=""
+ARM64_APK_NAME=""
+ARM64_APK_SHA256=""
+ARM64_APK_SIZE=""
 
-printf '%s\n' \
-    "## Zapret KVN $ZAPRET_VERSION_NAME" \
-    '' \
-    "- Канал: $ZAPRET_RELEASE_CHANNEL" \
-    '- Android package: io.github.zapretkvn.android' \
-    '- ABI: arm64-v8a' \
-    "- Core tag: \`$CORE_TAG\`" \
-    "- Core commit: \`$CORE_COMMIT\`" \
-    "- Signing certificate SHA-256: \`$SIGNER_SHA256\`" \
-    "- APK SHA-256: \`$APK_SHA256\`" \
-    '' \
-    'APK содержит libbox; отдельная динамическая загрузка ядра не используется.' \
-    '' \
-    '### Известные ограничения MVP' \
-    '' \
-    '- Android 8+; release APK содержит только arm64-v8a, интерфейс рассчитан на телефоны.' \
-    '- Always-on/Lockdown и shared UID не поддерживаются как гарантированный per-app режим.' \
-    '- Managed DNS перехватывает TCP/UDP 53, но не встроенный DoH, DoT или mDNS; FakeIP выключен.' \
-    '- Domain-only block не является firewall: для гарантии нужен IP/CIDR rule-set.' \
-    '- Clash YAML и Hysteria v1 URI пока не импортируются; raw JSON остаётся ответственностью пользователя.' \
-    '- Подписки, core и APK обновляются только вручную; silent install и фоновая синхронизация отсутствуют.' \
-    '- При неработающем proxy/DNS VPN закрывается без бесконечного retry и plaintext DNS fallback.' \
-    > "$OUTPUT_DIR/RELEASE_NOTES.md"
+for abi in "${RELEASE_ABIS[@]}"; do
+    source_apk="$SOURCE_DIR/app-$abi-release.apk"
+    [[ -f "$source_apk" ]]
+
+    mapfile -t native_abis < <(
+        unzip -Z1 "$source_apk" \
+            | sed -n 's#^lib/\([^/]*\)/.*\.so$#\1#p' \
+            | sort -u
+    )
+    if [[ "${#native_abis[@]}" -ne 1 || "${native_abis[0]}" != "$abi" ]]; then
+        echo "Unexpected native ABI set in $source_apk: ${native_abis[*]:-none}" >&2
+        exit 1
+    fi
+    unzip -Z1 "$source_apk" | grep -Fx "lib/$abi/libbox.so" >/dev/null
+
+    signature_info="$($APKSIGNER verify --verbose --print-certs "$source_apk")"
+    mapfile -t signer_digests < <(
+        sed -n 's/^Signer #[0-9][0-9]* certificate SHA-256 digest: //p' <<<"$signature_info"
+    )
+    [[ "${#signer_digests[@]}" -eq 1 ]]
+    signer="$(tr '[:upper:]' '[:lower:]' <<<"${signer_digests[0]}" | tr -d ':[:space:]')"
+    [[ "$signer" =~ ^[0-9a-f]{64}$ ]]
+    if [[ -z "$SIGNER_SHA256" ]]; then
+        SIGNER_SHA256="$signer"
+    elif [[ "$signer" != "$SIGNER_SHA256" ]]; then
+        echo "Release APKs are not signed by the same certificate" >&2
+        exit 1
+    fi
+
+    badging="$($AAPT2 dump badging "$source_apk" | sed -n '1p')"
+    [[ "$badging" == *"name='io.github.zapretkvn.android'"* ]]
+    [[ "$badging" == *"versionCode='$ZAPRET_VERSION_CODE'"* ]]
+    [[ "$badging" == *"versionName='$ZAPRET_VERSION_NAME'"* ]]
+
+    apk_name="Zapret-KVN-$TAG-$abi.apk"
+    cp "$source_apk" "$OUTPUT_DIR/$apk_name"
+    apk_sha256="$(sha256sum "$OUTPUT_DIR/$apk_name" | awk '{print $1}')"
+    apk_size="$(stat -c '%s' "$OUTPUT_DIR/$apk_name")"
+    printf '%s  %s\n' "$apk_sha256" "$apk_name" > "$OUTPUT_DIR/$apk_name.sha256"
+    ARTIFACTS+=("$(
+        jq -cn \
+            --arg abi "$abi" \
+            --arg apk_file "$apk_name" \
+            --arg apk_sha256 "$apk_sha256" \
+            --argjson apk_size "$apk_size" \
+            '{abi:$abi,apk_file:$apk_file,apk_sha256:$apk_sha256,apk_size:$apk_size}'
+    )")
+
+    if [[ "$abi" == arm64-v8a ]]; then
+        ARM64_APK_NAME="$apk_name"
+        ARM64_APK_SHA256="$apk_sha256"
+        ARM64_APK_SIZE="$apk_size"
+    fi
+done
+
+if [[ -n "${ZAPRET_EXPECTED_SIGNER_SHA256:-}" ]]; then
+    EXPECTED_SIGNER="$(tr '[:upper:]' '[:lower:]' <<<"$ZAPRET_EXPECTED_SIGNER_SHA256" | tr -d ':[:space:]')"
+    [[ "$EXPECTED_SIGNER" =~ ^[0-9a-f]{64}$ && "$SIGNER_SHA256" == "$EXPECTED_SIGNER" ]]
+fi
+
+# Schema 2 is used by architecture-aware clients.
+printf '%s\n' "${ARTIFACTS[@]}" | jq -s \
+    --arg version_name "$ZAPRET_VERSION_NAME" \
+    --argjson version_code "$ZAPRET_VERSION_CODE" \
+    --arg application_id "io.github.zapretkvn.android" \
+    --arg core_tag "$CORE_TAG" \
+    --arg core_commit "$CORE_COMMIT" \
+    --arg signer_sha256 "$SIGNER_SHA256" \
+    '{schema:2,version_name:$version_name,version_code:$version_code,application_id:$application_id,core_tag:$core_tag,core_commit:$core_commit,signer_sha256:$signer_sha256,artifacts:.}' \
+    > "$OUTPUT_DIR/release-metadata-v2.json"
+
+# Keep the schema-1 arm64 manifest so already-installed arm64 versions can cross
+# the metadata transition through their existing updater.
+jq -n \
+    --arg version_name "$ZAPRET_VERSION_NAME" \
+    --argjson version_code "$ZAPRET_VERSION_CODE" \
+    --arg application_id "io.github.zapretkvn.android" \
+    --arg core_tag "$CORE_TAG" \
+    --arg core_commit "$CORE_COMMIT" \
+    --arg signer_sha256 "$SIGNER_SHA256" \
+    --arg apk_file "$ARM64_APK_NAME" \
+    --arg apk_sha256 "$ARM64_APK_SHA256" \
+    --argjson apk_size "$ARM64_APK_SIZE" \
+    '{schema:1,version_name:$version_name,version_code:$version_code,application_id:$application_id,core_tag:$core_tag,core_commit:$core_commit,signer_sha256:$signer_sha256,abi:["arm64-v8a"],apk_file:$apk_file,apk_sha256:$apk_sha256,apk_size:$apk_size}' \
+    > "$OUTPUT_DIR/release-metadata.json"
+
+{
+    printf '%s\n' \
+        "## Zapret KVN $ZAPRET_VERSION_NAME" \
+        '' \
+        "- Канал: $ZAPRET_RELEASE_CHANNEL" \
+        '- Android package: io.github.zapretkvn.android' \
+        '- APK: отдельные arm64-v8a, armeabi-v7a и x86_64' \
+        "- Core tag: \`$CORE_TAG\`" \
+        "- Core commit: \`$CORE_COMMIT\`" \
+        "- Signing certificate SHA-256: \`$SIGNER_SHA256\`"
+    for artifact in "${ARTIFACTS[@]}"; do
+        printf -- '- %s APK SHA-256: `%s`\n' \
+            "$(jq -r .abi <<<"$artifact")" \
+            "$(jq -r .apk_sha256 <<<"$artifact")"
+    done
+    printf '%s\n' \
+        '' \
+        'Каждый APK содержит только одну архитектуру и встроенный libbox; отдельная динамическая загрузка ядра не используется.' \
+        '' \
+        '### Известные ограничения MVP' \
+        '' \
+        '- Android 8+; доступны отдельные arm64-v8a, armeabi-v7a и x86_64 APK, интерфейс рассчитан на телефоны.' \
+        '- Always-on/Lockdown и shared UID не поддерживаются как гарантированный per-app режим.' \
+        '- Managed DNS перехватывает TCP/UDP 53, но не встроенный DoH, DoT или mDNS; FakeIP выключен.' \
+        '- Domain-only block не является firewall: для гарантии нужен IP/CIDR rule-set.' \
+        '- Clash YAML и Hysteria v1 URI пока не импортируются; raw JSON остаётся ответственностью пользователя.' \
+        '- Подписки, core и APK обновляются только вручную; silent install и фоновая синхронизация отсутствуют.' \
+        '- При неработающем proxy/DNS VPN закрывается без бесконечного retry и plaintext DNS fallback.'
+} > "$OUTPUT_DIR/RELEASE_NOTES.md"
 
 echo "Release bundle created in $OUTPUT_DIR"

@@ -1,7 +1,11 @@
 package io.github.zapretkvn.android.importer
 
 import io.github.zapretkvn.android.config.ConfigAnalyzer
+import io.github.zapretkvn.android.config.DnsMode
 import io.github.zapretkvn.android.config.JsonConfig
+import io.github.zapretkvn.android.config.RuntimeConfigBuilder
+import io.github.zapretkvn.android.config.RuntimeConfigOptions
+import io.github.zapretkvn.android.config.RuntimeConfigResult
 import io.github.zapretkvn.android.diagnostics.SecretRedactor
 import io.github.zapretkvn.android.profiles.ManagedProfileEditor
 import io.github.zapretkvn.android.profiles.ManagedProfileFactory
@@ -21,6 +25,139 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ImportParserTest {
+    @Test
+    fun `wireguard conf maps directly to sing box endpoint`() {
+        val candidate = ImportParser.parse(
+            """
+                [Interface]
+                PrivateKey = TFlmmEUC7V7VtiDYLKsbP5rySTKLIZq1yn8lMqK83wo=
+                Address = 192.0.2.2/32
+                DNS = 192.0.2.53, 198.51.100.53
+
+                [Peer]
+                PublicKey = vBN7qyUTb5lJtWYJ8LhbPio1Z4RcyBPGnqFBGn6O6Qg=
+                Endpoint = 192.0.2.1:51820
+                AllowedIPs = 0.0.0.0/0
+                PersistentKeepalive = 25
+            """.trimIndent(),
+            ProfileSource.File,
+            "wg1_r1107syg5xn",
+        ) as ImportCandidate.WireGuard
+        val root = JsonConfig.parse(candidate.json) as JsonObject
+        val endpoint = (root["endpoints"] as JsonArray).single() as JsonObject
+        val peer = (endpoint["peers"] as JsonArray).single() as JsonObject
+        val route = root["route"] as JsonObject
+        val dnsServers = ((root["dns"] as JsonObject)["servers"] as JsonArray)
+
+        assertEquals("WireGuard", candidate.protocolName)
+        assertEquals("wg1_r1107syg5xn", candidate.suggestedName)
+        assertEquals("wireguard", endpoint.string("type"))
+        assertEquals("192.0.2.2/32", ((endpoint["address"] as JsonArray).single() as JsonPrimitive).content)
+        assertEquals("TFlmmEUC7V7VtiDYLKsbP5rySTKLIZq1yn8lMqK83wo=", endpoint.string("private_key"))
+        assertEquals("192.0.2.1", peer.string("address"))
+        assertEquals("51820", (peer["port"] as JsonPrimitive).content)
+        assertEquals("25", (peer["persistent_keepalive_interval"] as JsonPrimitive).content)
+        assertEquals("direct", route.string("final"))
+        assertEquals("wireguard-out", ((route["rules"] as JsonArray)[1] as JsonObject).string("outbound"))
+        assertEquals("wireguard-out", (dnsServers[1] as JsonObject).string("detour"))
+        assertEquals("wireguard-out", (dnsServers[2] as JsonObject).string("detour"))
+        assertTrue(
+            RuntimeConfigBuilder.build(
+                candidate.json,
+                options = RuntimeConfigOptions(dnsMode = DnsMode.FromJson),
+            ) is RuntimeConfigResult.Ready,
+        )
+        val automatic = RuntimeConfigBuilder.build(
+            candidate.json,
+            options = RuntimeConfigOptions(dnsMode = DnsMode.Automatic),
+        ) as RuntimeConfigResult.Ready
+        val automaticDns = (JsonConfig.parse(automatic.json) as JsonObject)["dns"] as JsonObject
+        val automaticServers = (automaticDns["servers"] as JsonArray).map { it as JsonObject }
+        assertEquals("zapret-secure-dns", automaticDns.string("final"))
+        assertEquals(
+            "wireguard-out",
+            automaticServers.first { it.string("tag") == "zapret-doh-1" }.string("detour"),
+        )
+    }
+
+    @Test
+    fun `amneziawg 2 conf maps native obfuscation fields without a proxy layer`() {
+        val candidate = ImportParser.parse(
+            """
+                # AWG 2.0 native format
+                [Interface]
+                PrivateKey = TFlmmEUC7V7VtiDYLKsbP5rySTKLIZq1yn8lMqK83wo=
+                Address = 10.8.1.4/32, fd00::4/128
+                MTU = 1420
+                Jc = 4
+                Jmin = 10
+                Jmax = 50
+                S1 = 142
+                S2 = 41
+                S3 = 56
+                S4 = 11
+                H1 = 684141592-1751861769
+                H2 = 1957920865
+                H3 = 2043550980-2107134838
+                H4 = 2127672251-2132651859
+                I1 = <r 2><b 0x858000010001000000000669636c6f756403636f6d0000010001c00c000100010000105a00044d583737>
+                I2 =
+                I3 =
+                I4 =
+                I5 =
+
+                [Peer]
+                PublicKey = vBN7qyUTb5lJtWYJ8LhbPio1Z4RcyBPGnqFBGn6O6Qg=
+                PresharedKey = AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+                AllowedIPs = 0.0.0.0/0, ::/0
+                Endpoint = vpn.example:42333
+                PersistentKeepalive = 25
+            """.trimIndent(),
+            ProfileSource.File,
+            "AWG Finland",
+        ) as ImportCandidate.WireGuard
+        val root = JsonConfig.parse(candidate.json) as JsonObject
+        val endpoint = (root["endpoints"] as JsonArray).single() as JsonObject
+        val amnezia = endpoint["amnezia"] as JsonObject
+
+        assertEquals("AmneziaWG 2.0", candidate.protocolName)
+        assertEquals("1420", (endpoint["mtu"] as JsonPrimitive).content)
+        assertEquals("4", (amnezia["jc"] as JsonPrimitive).content)
+        assertEquals("684141592-1751861769", amnezia.string("h1"))
+        assertEquals("1957920865", (amnezia["h2"] as JsonPrimitive).content)
+        assertEquals(
+            "<r 2><b 0x858000010001000000000669636c6f756403636f6d0000010001c00c000100010000105a00044d583737>",
+            amnezia.string("i1"),
+        )
+        assertFalse("i2" in amnezia)
+        assertEquals(1, (root["outbounds"] as JsonArray).size)
+        assertEquals("direct", ((root["outbounds"] as JsonArray).single() as JsonObject).string("type"))
+    }
+
+    @Test
+    fun `wireguard conf rejects unknown keys malformed keys and awg tags`() {
+        val base = """
+            [Interface]
+            PrivateKey = TFlmmEUC7V7VtiDYLKsbP5rySTKLIZq1yn8lMqK83wo=
+            Address = 192.0.2.2/32
+            %s
+            [Peer]
+            PublicKey = vBN7qyUTb5lJtWYJ8LhbPio1Z4RcyBPGnqFBGn6O6Qg=
+            Endpoint = 192.0.2.1:51820
+            AllowedIPs = 0.0.0.0/0
+        """.trimIndent()
+
+        assertThrows(ImportException::class.java) {
+            ImportParser.parse(base.format("PostUp = curl bad.example"), ProfileSource.File)
+        }
+        assertThrows(ImportException::class.java) {
+            ImportParser.parse(base.format("PrivateKey = not-base64"), ProfileSource.File)
+        }
+        assertThrows(ImportException::class.java) {
+            ImportParser.parse(base.format("I1 = <unknown 2>"), ProfileSource.File)
+        }
+    }
+
     @Test
     fun `plain and base64 subscriptions support six protocol families`() {
         val vmessPayload = Base64.getEncoder().withoutPadding().encodeToString(
@@ -193,4 +330,5 @@ class ImportParserTest {
 
     private fun JsonObject.string(key: String): String? =
         (this[key] as? JsonPrimitive)?.contentOrNull
+
 }

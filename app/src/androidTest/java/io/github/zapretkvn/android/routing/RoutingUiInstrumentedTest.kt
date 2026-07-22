@@ -97,11 +97,11 @@ class RoutingUiInstrumentedTest {
     @Test
     fun excludeModeShowsWarningAndPersistsAdvancedScope() {
         composeRule.onNodeWithText("Маршруты").performClick()
-        composeRule.onNodeWithText("Исключения").performClick()
+        composeRule.onNodeWithText("Приложения напрямую").performClick()
         composeRule.waitUntil(10_000) {
             runBlocking { container.appSelectionStore.selection.first().mode == AppScopeMode.Exclude }
         }
-        composeRule.onNodeWithText("Расширенный режим:", substring = true).assertExists()
+        composeRule.onNodeWithText("Режим «Приложения напрямую»:", substring = true).assertExists()
     }
 
     @Test

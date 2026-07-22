@@ -158,7 +158,7 @@ go test ./dns/... ./route/rule ./experimental/libbox
 
 go install "github.com/sagernet/gomobile/cmd/gomobile@$GOMOBILE_VERSION"
 go install "github.com/sagernet/gomobile/cmd/gobind@$GOMOBILE_VERSION"
-go run ./cmd/internal/build_libbox -target android -platform android/arm64,android/amd64
+go run ./cmd/internal/build_libbox -target android -platform android/arm,android/arm64,android/amd64
 
 install -m 0644 libbox.aar "$LIBS_DIR/libbox.aar"
 install -m 0644 libbox.aar "$OUTPUT_DIR/libbox.aar"
@@ -174,6 +174,7 @@ mapfile -t LIBBOX_NATIVE_ENTRIES < <(
 )
 EXPECTED_LIBBOX_NATIVE_ENTRIES=(
     "jni/arm64-v8a/libbox.so"
+    "jni/armeabi-v7a/libbox.so"
     "jni/x86_64/libbox.so"
 )
 if [[ "${LIBBOX_NATIVE_ENTRIES[*]}" != "${EXPECTED_LIBBOX_NATIVE_ENTRIES[*]}" ]]; then
@@ -191,7 +192,7 @@ cat > "$OUTPUT_DIR/core-build-metadata.json" <<EOF
   "go": "$GO_VERSION",
   "gomobile": "$GOMOBILE_VERSION",
   "android_ndk": "$ANDROID_NDK_VERSION",
-  "abis": ["arm64-v8a", "x86_64"]
+  "abis": ["arm64-v8a", "armeabi-v7a", "x86_64"]
 }
 EOF
 install -m 0644 "$SOURCE_DIR/LICENSE" "$OUTPUT_DIR/sing-box-extended-LICENSE.txt"

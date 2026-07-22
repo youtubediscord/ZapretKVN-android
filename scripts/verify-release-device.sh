@@ -37,6 +37,7 @@ fi
 device_abi="$($ADB shell getprop ro.product.cpu.abi | tr -d '\r')"
 case "$device_abi" in
     arm64-v8a) release_abi=arm64-v8a ;;
+    armeabi-v7a) release_abi=armeabi-v7a ;;
     x86_64) release_abi=x86_64 ;;
     *) echo "Unsupported release-candidate device ABI: $device_abi" >&2; exit 1 ;;
 esac
@@ -62,7 +63,7 @@ build_release() {
         ZAPRET_SIGNING_KEY_ALIAS=release \
         ZAPRET_SIGNING_KEY_PASSWORD=changeit \
         "$PROJECT_ROOT/gradlew" --no-configuration-cache :app:assembleRelease \
-            -PzapretReleaseAbi="$release_abi" \
+            -PzapretAbi="$release_abi" \
             -PzapretVersionName="$version_name" \
             -PzapretVersionCode="$version_code" >/dev/null
     mapfile -t apks < <(find "$PROJECT_ROOT/app/build/outputs/apk/release" -maxdepth 1 -type f -name '*.apk' | sort)

@@ -3,6 +3,7 @@ package io.github.zapretkvn.android
 import android.content.Context
 import io.github.zapretkvn.android.config.LibboxConfigValidator
 import io.github.zapretkvn.android.diagnostics.DiagnosticExporter
+import io.github.zapretkvn.android.diagnostics.AppCrashStore
 import io.github.zapretkvn.android.vpn.BootstrapCache
 import io.github.zapretkvn.android.vpn.BootstrapResolver
 import io.github.zapretkvn.android.importer.AndroidImportReader
@@ -25,7 +26,10 @@ import io.github.zapretkvn.android.vpn.ProxyBootstrapper
 import io.github.zapretkvn.android.vpn.VpnHealthPipeline
 import java.io.File
 
-class AppContainer(context: Context) {
+class AppContainer(
+    context: Context,
+    val appCrashStore: AppCrashStore,
+) {
     val appContext: Context = context.applicationContext
     val libboxRuntime = LibboxRuntime(appContext)
     val configValidator = LibboxConfigValidator()
@@ -45,11 +49,12 @@ class AppContainer(context: Context) {
         ownPackageName = appContext.packageName,
         packageAvailability = AndroidPackageAvailability(appContext.packageManager),
     )
-    val vpnController = VpnController(appContext)
+    val vpnController = VpnController(appContext, appCrashStore.read())
     val diagnosticExporter = DiagnosticExporter(
         context = appContext,
         settingsStore = uiSettingsStore,
         vpnController = vpnController,
+        crashStore = appCrashStore,
     ).also(DiagnosticExporter::cleanupStaleFiles)
     val updateController = UpdateController(
         context = appContext,
@@ -72,6 +77,7 @@ class AppContainer(context: Context) {
             subscriptionSourceStore,
             vpnController,
             bootstrapCache,
+            ruleSetAssetManager,
         )
 
     val appsViewModelFactory: AppsViewModel.Factory

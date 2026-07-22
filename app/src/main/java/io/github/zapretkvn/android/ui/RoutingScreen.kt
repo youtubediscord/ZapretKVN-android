@@ -90,7 +90,7 @@ fun RoutingScreen(
                         FilterChip(
                             selected = appsState.scopeMode == AppScopeMode.Exclude,
                             onClick = { appsViewModel.setScopeMode(AppScopeMode.Exclude) },
-                            label = { Text("Исключения") },
+                            label = { Text("Приложения напрямую") },
                         )
                     }
                     Text(
@@ -101,7 +101,7 @@ fun RoutingScreen(
                                 "В Android TUN: ${appsState.allowedPackages.size}"
                             }
                             AppScopeMode.Exclude -> if (appsState.allowedPackages.isEmpty()) {
-                                "Пустой список исключений: запуск заблокирован"
+                                "Приложения напрямую не выбраны: запуск заблокирован"
                             } else {
                                 "Напрямую вне TUN: ${appsState.allowedPackages.size}"
                             }
@@ -117,7 +117,8 @@ fun RoutingScreen(
                         if (appsState.scopeMode == AppScopeMode.Include) {
                             "Android отсекает остальные приложения до TUN: они не создают per-packet работу Zapret KVN."
                         } else {
-                            "Расширенный режим: все приложения, кроме отмеченных, попадут в VPN. Это увеличивает трафик и нагрузку."
+                            "Режим «Приложения напрямую»: отмеченные приложения остаются вне TUN; " +
+                                "все остальные попадут в VPN."
                         },
                         color = if (appsState.scopeMode == AppScopeMode.Exclude) {
                             MaterialTheme.colorScheme.error
@@ -127,8 +128,8 @@ fun RoutingScreen(
                     )
                     if (appsState.missingPackages.isNotEmpty()) {
                         Text(
-                            "Недоступных пакетов: ${appsState.missingPackages.size}. До их удаления VPN не запустится.",
-                            color = MaterialTheme.colorScheme.error,
+                            "Недоступных пакетов: ${appsState.missingPackages.size}. Они будут пропущены при подключении.",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                     Button(
@@ -138,11 +139,17 @@ fun RoutingScreen(
                             contentDescription = if (appsState.scopeMode == AppScopeMode.Include) {
                                 "Открыть выбор приложений для VPN"
                             } else {
-                                "Открыть выбор исключений из VPN"
+                                "Открыть выбор приложений напрямую вне VPN"
                             }
                         },
                     ) {
-                        Text(if (appsState.scopeMode == AppScopeMode.Include) "Выбрать приложения" else "Выбрать исключения")
+                        Text(
+                            if (appsState.scopeMode == AppScopeMode.Include) {
+                                "Выбрать приложения"
+                            } else {
+                                "Выбрать приложения напрямую"
+                            },
+                        )
                     }
                 }
             }
@@ -189,7 +196,7 @@ fun RoutingScreen(
                                 inspection.summary
                             } else {
                                 inspection.summary.substringBefore("Остальные приложения:") +
-                                    "Исключённые приложения: напрямую, вне VPN; все остальные входят в TUN."
+                                    "Приложения напрямую: вне VPN и TUN; все остальные входят в TUN."
                             },
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )

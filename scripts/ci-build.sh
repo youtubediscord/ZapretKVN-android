@@ -37,30 +37,18 @@ fi
     testDebugUnitTest \
     lintDebug \
     assembleDebug \
-    assembleDebugAndroidTest \
-    assembleRelease
+    assembleDebugAndroidTest
+scripts/build-apk-matrix.sh release
 
-mapfile -t RELEASE_APKS < <(find app/build/outputs/apk/release -type f -name '*.apk' | sort)
-if [[ "${#RELEASE_APKS[@]}" -ne 1 ]]; then
-    echo "Expected exactly one release APK, found ${#RELEASE_APKS[@]}" >&2
+RELEASE_MATRIX_DIR="app/build/outputs/apk/matrix/release"
+RELEASE_ABIS=(arm64-v8a armeabi-v7a x86_64)
+mapfile -t RELEASE_APKS < <(find "$RELEASE_MATRIX_DIR" -maxdepth 1 -type f -name '*.apk' | sort)
+if [[ "${#RELEASE_APKS[@]}" -ne "${#RELEASE_ABIS[@]}" ]]; then
+    echo "Expected ${#RELEASE_ABIS[@]} release APKs, found ${#RELEASE_APKS[@]}" >&2
     exit 1
 fi
-RELEASE_APK="${RELEASE_APKS[0]}"
-
-mapfile -t RELEASE_APK_ENTRIES < <(unzip -Z1 "$RELEASE_APK")
-mapfile -t RELEASE_NATIVE_ABIS < <(
-    printf '%s\n' "${RELEASE_APK_ENTRIES[@]}" \
-        | sed -n 's#^lib/\([^/]*\)/.*\.so$#\1#p' \
-        | sort -u
-)
-if [[ "${#RELEASE_NATIVE_ABIS[@]}" -ne 1 || "${RELEASE_NATIVE_ABIS[0]}" != "arm64-v8a" ]]; then
-    echo "Unexpected release APK ABI set: ${RELEASE_NATIVE_ABIS[*]:-none}" >&2
-    exit 1
-fi
-if [[ ! " ${RELEASE_APK_ENTRIES[*]} " == *" lib/arm64-v8a/libbox.so "* ]]; then
-    echo "Release APK does not contain arm64-v8a libbox" >&2
-    exit 1
-fi
+RELEASE_APK="$RELEASE_MATRIX_DIR/app-arm64-v8a-release.apk"
+[[ -f "$RELEASE_APK" ]]
 
 mkdir -p app/build
 "$AAPT2" dump permissions "$RELEASE_APK" > app/build/permissions.txt
@@ -109,7 +97,12 @@ for legal_resource in raw/license_gpl_3 raw/notice raw/sing_box_extended_license
     fi
 done
 
-scripts/verify-release-candidate.sh "$RELEASE_APK"
+for abi in "${RELEASE_ABIS[@]}"; do
+    scripts/verify-release-candidate.sh \
+        "$RELEASE_MATRIX_DIR/app-$abi-release.apk" \
+        app/build/outputs/mapping/release/mapping.txt \
+        "$abi"
+done
 
 (
     cd app/build/outputs/apk

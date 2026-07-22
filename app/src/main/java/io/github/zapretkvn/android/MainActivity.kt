@@ -130,6 +130,13 @@ class MainActivity : ComponentActivity() {
                 )
             }
         }
+        if (savedInstanceState == null) handleExternalImport(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleExternalImport(intent)
     }
 
     override fun onStart() {
@@ -157,6 +164,13 @@ class MainActivity : ComponentActivity() {
     private fun updateVisibleStreams() {
         vpnController.setHomeVisible(activityStarted && homeSelected)
         vpnController.setDiagnosticsVisible(activityStarted && diagnosticsSelected)
+    }
+
+    private fun handleExternalImport(intent: Intent) {
+        if (intent.action != Intent.ACTION_VIEW) return
+        val uri = intent.data ?: return
+        if (uri.scheme !in setOf("content", "file", "android.resource")) return
+        profilesViewModel.importDocument(uri)
     }
 
     private fun requestVpnStart(profileId: String) {

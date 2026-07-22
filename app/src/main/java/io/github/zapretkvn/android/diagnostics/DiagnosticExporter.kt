@@ -35,6 +35,7 @@ class DiagnosticExporter(
     context: Context,
     private val settingsStore: UiSettingsStore,
     private val vpnController: VpnController,
+    private val crashStore: AppCrashStore,
 ) {
     private val appContext = context.applicationContext
     private val exportDirectory = File(appContext.cacheDir, DIRECTORY_NAME)
@@ -82,7 +83,7 @@ class DiagnosticExporter(
         val network = readCurrentNetwork(diagnostics.network)
         val now = System.currentTimeMillis()
         val root = buildJsonObject {
-            put("report_version", 1)
+            put("report_version", 2)
             put("created_at", isoTimestamp(now))
             put("created_at_epoch_ms", now)
             put(
@@ -127,6 +128,11 @@ class DiagnosticExporter(
                 },
             )
             put("last_error", failureJson(diagnostics.lastFailure))
+            put(
+                "connection_attempt",
+                diagnostics.connectionAttempt?.let(::connectionAttemptJson) ?: JsonNull,
+            )
+            put("previous_crash", crashJson(crashStore.read()))
             put(
                 "effective_overlay",
                 diagnostics.effectiveOverlay
@@ -206,8 +212,70 @@ class DiagnosticExporter(
         failure?.let {
             put("type", it.type.code)
             put("title", it.type.title)
+            put("support_code", it.supportCode)
             put("message", it.message)
+            it.technicalDetail?.let { detail -> put("technical_detail", detail) }
             put("occurred_at_epoch_ms", it.occurredAtEpochMillis)
+        }
+    }
+
+    private fun connectionAttemptJson(attempt: DiagnosticConnectionAttempt): JsonObject =
+        buildJsonObject {
+            put("generation", attempt.generation)
+            put("trigger", attempt.trigger)
+            put("started_at_epoch_ms", attempt.startedAtEpochMillis)
+            put("outcome", attempt.outcome.code)
+            attempt.totalDurationMillis?.let { put("total_duration_ms", it) }
+            attempt.slowestCompletedStage?.let { slowest ->
+                put(
+                    "slowest_stage",
+                    buildJsonObject {
+                        put("key", slowest.key)
+                        put("label", slowest.label)
+                        put("duration_ms", checkNotNull(slowest.durationMillis))
+                    },
+                )
+            }
+            put(
+                "stages",
+                buildJsonArray {
+                    attempt.stages.forEach { stage ->
+                        add(
+                            buildJsonObject {
+                                put("key", stage.key)
+                                put("label", stage.label)
+                                put("started_at_epoch_ms", stage.startedAtEpochMillis)
+                                stage.durationMillis?.let { put("duration_ms", it) }
+                                put("status", stage.status.code)
+                            },
+                        )
+                    }
+                },
+            )
+        }
+
+    private fun crashJson(crash: AppCrashRecord?): JsonObject = buildJsonObject {
+        put("present", crash != null)
+        crash?.let { record ->
+            put("occurred_at_epoch_ms", record.occurredAtEpochMillis)
+            put("thread", record.threadName)
+            put("exception", record.exceptionType)
+            record.message?.let { put("message", it) }
+            put("causes", buildJsonArray { record.causes.forEach { add(kotlinx.serialization.json.JsonPrimitive(it)) } })
+            put(
+                "stack",
+                buildJsonArray {
+                    record.stack.forEach { frame ->
+                        add(
+                            buildJsonObject {
+                                put("class", frame.className)
+                                put("method", frame.methodName)
+                                put("line", frame.lineNumber)
+                            },
+                        )
+                    }
+                },
+            )
         }
     }
 

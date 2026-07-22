@@ -15,22 +15,23 @@ val libboxAar = layout.projectDirectory.file("libs/libbox.aar").asFile
 val libboxMetadata = layout.projectDirectory.file("libs/libbox.properties").asFile
 val appVersionCode = providers.gradleProperty("zapretVersionCode")
     .orElse(providers.environmentVariable("ZAPRET_VERSION_CODE"))
-    .orElse("1")
+    .orElse("200099")
     .get()
     .toInt()
 val appVersionName = providers.gradleProperty("zapretVersionName")
     .orElse(providers.environmentVariable("ZAPRET_VERSION_NAME"))
-    .orElse("0.1.0-dev")
+    .orElse("0.2.0")
     .get()
 val updateRepository = providers.gradleProperty("zapretUpdateRepository")
     .orElse(providers.environmentVariable("ZAPRET_UPDATE_REPOSITORY"))
     .orElse("youtubediscord/ZapretKVN-android")
     .get()
     .also { require(Regex("[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+").matches(it)) }
-val releaseAbi = providers.gradleProperty("zapretReleaseAbi")
-    .orElse("arm64-v8a")
-    .get()
-    .also { require(it in setOf("arm64-v8a", "x86_64")) { "Unsupported release ABI: $it" } }
+val supportedApkAbis = setOf("arm64-v8a", "armeabi-v7a", "x86_64")
+val requestedApkAbi = providers.gradleProperty("zapretAbi")
+    .orElse(providers.gradleProperty("zapretReleaseAbi"))
+    .orNull
+    ?.also { require(it in supportedApkAbis) { "Unsupported APK ABI: $it" } }
 val signingStorePath = providers.environmentVariable("ZAPRET_SIGNING_STORE_FILE").orNull
 val signingStorePassword = providers.environmentVariable("ZAPRET_SIGNING_STORE_PASSWORD").orNull
 val signingKeyAlias = providers.environmentVariable("ZAPRET_SIGNING_KEY_ALIAS").orNull
@@ -54,6 +55,7 @@ require(releaseSigningValueCount == 0 || releaseSigningValueCount == 4) {
 android {
     namespace = "io.github.zapretkvn.android"
     compileSdk = 36
+    ndkVersion = coreProperties.getProperty("ANDROID_NDK_VERSION")
 
     defaultConfig {
         applicationId = "io.github.zapretkvn.android"
@@ -63,6 +65,12 @@ android {
         versionName = appVersionName
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        requestedApkAbi?.let { abi ->
+            ndk {
+                abiFilters += abi
+            }
+        }
 
         buildConfigField("String", "CORE_TAG", "\"$coreTag\"")
         buildConfigField("String", "UPDATE_REPOSITORY", "\"$updateRepository\"")
@@ -91,13 +99,24 @@ android {
         debug {
             applicationIdSuffix = ".debug"
             versionNameSuffix = "-debug"
+            if (requestedApkAbi == null) {
+                ndk {
+                    // CI and the default local Android test target use an x86_64 AVD.
+                    // Device tests can select another single ABI with -PzapretAbi.
+                    abiFilters += "x86_64"
+                }
+            }
         }
         release {
             signingConfig = signingConfigs.findByName("release")
             isMinifyEnabled = true
             isShrinkResources = true
-            ndk {
-                abiFilters += releaseAbi
+            if (requestedApkAbi == null) {
+                ndk {
+                    // A direct assembleRelease remains small and predictable. The release
+                    // workflow passes zapretAbi once per supported architecture.
+                    abiFilters += "arm64-v8a"
+                }
             }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
@@ -131,6 +150,8 @@ dependencies {
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation(files(libboxAar))
+    implementation(project(":network-bootstrap"))
+    implementation(project(":wireguard-import"))
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.10.0")
     implementation("com.journeyapps:zxing-android-embedded:4.3.0")
 

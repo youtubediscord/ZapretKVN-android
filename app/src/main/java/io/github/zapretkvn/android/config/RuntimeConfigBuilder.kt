@@ -1,5 +1,8 @@
 package io.github.zapretkvn.android.config
 
+import io.github.zapretkvn.android.hardening.RuntimeHardeningResult
+import io.github.zapretkvn.android.hardening.VpnHidingOptions
+import io.github.zapretkvn.android.hardening.VpnRuntimeHardening
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -19,6 +22,7 @@ enum class DnsMode {
 data class RuntimeConfigOptions(
     val dnsMode: DnsMode = DnsMode.FromJson,
     val bootstrapHost: BootstrapHostOverlay? = null,
+    val vpnHiding: VpnHidingOptions = VpnHidingOptions(),
 )
 
 sealed interface RuntimeConfigResult {
@@ -36,11 +40,15 @@ object RuntimeConfigBuilder {
         enableTrafficStats: Boolean = false,
         options: RuntimeConfigOptions = RuntimeConfigOptions(),
     ): RuntimeConfigResult {
-        val root = try {
+        val storedRoot = try {
             JsonConfig.parse(raw) as? JsonObject
                 ?: return invalid("Корень конфигурации должен быть JSON-объектом.")
         } catch (_: Exception) {
             return invalid("JSON содержит синтаксическую ошибку.")
+        }
+        val root = when (val hardened = VpnRuntimeHardening.apply(storedRoot, options.vpnHiding)) {
+            is RuntimeHardeningResult.Ready -> hardened.root
+            is RuntimeHardeningResult.Blocked -> return invalid(hardened.message)
         }
 
         findForbiddenField(root)?.let { field ->
@@ -313,12 +321,21 @@ object RuntimeConfigBuilder {
 
     private fun automaticFinal(root: JsonObject, selectedProxyTag: String): String {
         val final = (root["route"] as? JsonObject)?.string("final")
-        return if (final == "direct") ANDROID_DNS_TAG else if (final == selectedProxyTag) {
+        return if (final == "direct" && !routesAllAddressesThrough(root, selectedProxyTag)) {
+            ANDROID_DNS_TAG
+        } else if (final == selectedProxyTag || routesAllAddressesThrough(root, selectedProxyTag)) {
             SECURE_DNS_TAG
         } else {
             SECURE_DNS_TAG
         }
     }
+
+    private fun routesAllAddressesThrough(root: JsonObject, tag: String): Boolean =
+        (((root["route"] as? JsonObject)?.get("rules") as? JsonArray).orEmpty())
+            .mapNotNull { it as? JsonObject }
+            .filter { it.string("action") == "route" && it.string("outbound") == tag }
+            .flatMap { stringArray(it["ip_cidr"]) }
+            .any { it == "0.0.0.0/0" || it == "::/0" }
 
     private fun catchAllDnsRule(server: String): JsonObject = buildJsonObject {
         put("action", "route")

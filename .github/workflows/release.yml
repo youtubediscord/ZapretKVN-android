@@ -28,11 +28,14 @@ jobs:
     env:
       RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
       ZAPRET_UPDATE_REPOSITORY: ${{ github.repository }}
-      ZAPRET_SIGNING_STORE_FILE: ${{ runner.temp }}/zapret-kvn-release.jks
       ZAPRET_REQUIRE_SIGNED_RELEASE: "1"
       ZAPRET_EXPECTED_SIGNER_SHA256: ${{ secrets.ANDROID_SIGNING_CERT_SHA256 }}
 
     steps:
+      - name: Configure runner paths
+        shell: bash
+        run: echo "ZAPRET_SIGNING_STORE_FILE=$RUNNER_TEMP/zapret-kvn-release.jks" >> "$GITHUB_ENV"
+
       - name: Require explicit final-gate attestation
         shell: bash
         env:
@@ -71,7 +74,7 @@ jobs:
         shell: bash
         run: |
           source core.properties
-          yes | sdkmanager --licenses >/dev/null
+          sdkmanager --licenses >/dev/null < <(yes)
           sdkmanager \
             "platforms;android-$ANDROID_COMPILE_SDK" \
             "build-tools;$ANDROID_BUILD_TOOLS" \
@@ -124,8 +127,10 @@ jobs:
       - name: Create verified release bundle
         shell: bash
         run: |
-          release_apk="$(find app/build/outputs/apk/release -type f -name '*.apk' -print -quit)"
-          scripts/create-release-bundle.sh "$RELEASE_TAG" "$release_apk" release-out
+          scripts/create-release-bundle.sh \
+            "$RELEASE_TAG" \
+            app/build/outputs/apk/matrix/release \
+            release-out
 
       - name: Upload release proof
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -142,7 +147,7 @@ jobs:
             core-build/output/native-debug-symbols.zip
             core-build/output/native-symbols-metadata.json
             core-build/output/native-symbols-SHA256SUMS
-            build/release-candidate/security-report.json
+            build/release-candidate/security-report-*.json
             build/gate6-process-recreation/**
             build/gate8-stress/**
             build/gate8-performance/**
@@ -160,9 +165,14 @@ jobs:
           fi
           prerelease=()
           if [[ "$ZAPRET_PRERELEASE" == true ]]; then prerelease=(--prerelease); fi
-          apk="$(find release-out -maxdepth 1 -type f -name '*.apk' -print -quit)"
+          mapfile -t assets < <(
+            find release-out -maxdepth 1 -type f \
+              \( -name '*.apk' -o -name '*.apk.sha256' -o -name 'release-metadata*.json' \) \
+              | sort
+          )
+          test "${#assets[@]}" -eq 8
           gh release create "$RELEASE_TAG" \
-            "$apk" "$apk.sha256" release-out/release-metadata.json \
+            "${assets[@]}" \
             --verify-tag \
             --title "Zapret KVN $ZAPRET_VERSION_NAME" \
             --notes-file release-out/RELEASE_NOTES.md \

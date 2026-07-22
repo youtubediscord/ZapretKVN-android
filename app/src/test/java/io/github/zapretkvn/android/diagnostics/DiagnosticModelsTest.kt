@@ -24,6 +24,15 @@ class DiagnosticModelsTest {
             DiagnosticErrorType.Permission,
             DiagnosticFailureClassifier.classify("Android Always-on/Lockdown не поддерживается"),
         )
+        assertEquals(
+            DiagnosticErrorType.SystemDns,
+            DiagnosticFailureClassifier.classify("Системный DNS не ответил вовремя"),
+        )
+        assertEquals("DNS-100", DiagnosticErrorType.SystemDns.supportCode)
+        assertEquals(
+            DiagnosticErrorType.entries.size,
+            DiagnosticErrorType.entries.map(DiagnosticErrorType::supportCode).distinct().size,
+        )
     }
 
     @Test
@@ -48,5 +57,44 @@ class DiagnosticModelsTest {
         assertEquals(MAX_DIAGNOSTIC_LOG_LINES, result.size)
         assertEquals("line-20", result.first().message)
         assertEquals("line-99", result.last().message)
+    }
+
+    @Test
+    fun `connection attempt exposes the slowest completed stage`() {
+        val attempt = DiagnosticConnectionAttempt(
+            generation = 7,
+            trigger = "user_start",
+            startedAtEpochMillis = 1_000,
+            startedAtElapsedRealtimeMillis = 100,
+            totalDurationMillis = 900,
+            outcome = DiagnosticAttemptOutcome.Connected,
+            stages = listOf(
+                DiagnosticStageTiming(
+                    key = "profile",
+                    label = "Профиль",
+                    startedAtEpochMillis = 1_000,
+                    startedAtElapsedRealtimeMillis = 100,
+                    durationMillis = 150,
+                    status = DiagnosticStageStatus.Success,
+                ),
+                DiagnosticStageTiming(
+                    key = "core_tun",
+                    label = "Core и TUN",
+                    startedAtEpochMillis = 1_150,
+                    startedAtElapsedRealtimeMillis = 250,
+                    durationMillis = 610,
+                    status = DiagnosticStageStatus.Success,
+                ),
+                DiagnosticStageTiming(
+                    key = "finalize",
+                    label = "Финализация",
+                    startedAtEpochMillis = 1_760,
+                    startedAtElapsedRealtimeMillis = 860,
+                ),
+            ),
+        )
+
+        assertEquals("core_tun", attempt.slowestCompletedStage?.key)
+        assertEquals(610L, attempt.slowestCompletedStage?.durationMillis)
     }
 }

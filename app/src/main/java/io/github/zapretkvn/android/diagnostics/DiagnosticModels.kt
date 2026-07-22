@@ -3,17 +3,18 @@ package io.github.zapretkvn.android.diagnostics
 enum class DiagnosticErrorType(
     val code: String,
     val title: String,
+    val supportCode: String,
 ) {
-    Permission("permission", "Разрешение VPN"),
-    Profile("profile", "Профиль или JSON"),
-    SystemDns("system_dns", "Системный DNS"),
-    PrivateDns("private_dns", "Private DNS"),
-    VpnServer("vpn_server", "VPN-сервер"),
-    VpnDns("vpn_dns", "DNS через VPN"),
-    CaptivePortal("captive_portal", "Авторизация Wi-Fi"),
-    Core("core", "Ядро sing-box"),
-    AndroidNetwork("android_network", "Сеть Android"),
-    Unknown("unknown", "Неизвестная ошибка"),
+    Permission("permission", "Разрешение VPN", "VPN-101"),
+    Profile("profile", "Профиль или JSON", "CFG-101"),
+    SystemDns("system_dns", "Системный DNS", "DNS-100"),
+    PrivateDns("private_dns", "Private DNS", "DNS-110"),
+    VpnServer("vpn_server", "VPN-сервер", "SRV-100"),
+    VpnDns("vpn_dns", "DNS через VPN", "DNS-200"),
+    CaptivePortal("captive_portal", "Авторизация Wi-Fi", "NET-110"),
+    Core("core", "Ядро sing-box", "CORE-100"),
+    AndroidNetwork("android_network", "Сеть Android", "NET-100"),
+    Unknown("unknown", "Неизвестная ошибка", "VPN-000"),
 }
 
 object DiagnosticFailureClassifier {
@@ -50,7 +51,9 @@ object DiagnosticFailureClassifier {
 
 data class DiagnosticFailure(
     val type: DiagnosticErrorType,
+    val supportCode: String,
     val message: String,
+    val technicalDetail: String? = null,
     val occurredAtEpochMillis: Long,
 )
 
@@ -90,6 +93,45 @@ data class DiagnosticVpnPolicy(
     val lockdown: Boolean,
 )
 
+enum class DiagnosticStageStatus(val code: String) {
+    Running("running"),
+    Success("success"),
+    Failed("failed"),
+    Cancelled("cancelled"),
+}
+
+enum class DiagnosticAttemptOutcome(val code: String) {
+    Running("running"),
+    Connected("connected"),
+    Failed("failed"),
+    Cancelled("cancelled"),
+}
+
+data class DiagnosticStageTiming(
+    val key: String,
+    val label: String,
+    val startedAtEpochMillis: Long,
+    internal val startedAtElapsedRealtimeMillis: Long,
+    val durationMillis: Long? = null,
+    val status: DiagnosticStageStatus = DiagnosticStageStatus.Running,
+)
+
+data class DiagnosticConnectionAttempt(
+    val generation: Long,
+    val trigger: String,
+    val startedAtEpochMillis: Long,
+    internal val startedAtElapsedRealtimeMillis: Long,
+    val totalDurationMillis: Long? = null,
+    val outcome: DiagnosticAttemptOutcome = DiagnosticAttemptOutcome.Running,
+    val stages: List<DiagnosticStageTiming> = emptyList(),
+) {
+    val slowestCompletedStage: DiagnosticStageTiming?
+        get() = stages
+            .asSequence()
+            .filter { it.durationMillis != null }
+            .maxByOrNull { it.durationMillis ?: -1L }
+}
+
 data class DiagnosticState(
     val generation: Long = 0,
     val lastFailure: DiagnosticFailure? = null,
@@ -99,6 +141,8 @@ data class DiagnosticState(
     val network: DiagnosticNetworkState? = null,
     val vpnPolicy: DiagnosticVpnPolicy? = null,
     val effectiveOverlay: String? = null,
+    val connectionAttempt: DiagnosticConnectionAttempt? = null,
+    val previousCrash: AppCrashRecord? = null,
 ) {
     val logs: List<DiagnosticLogLine>
         get() = (applicationLogs + coreLogs)
@@ -110,3 +154,4 @@ internal fun List<DiagnosticLogLine>.appendBounded(line: DiagnosticLogLine): Lis
     (this + line).takeLast(MAX_DIAGNOSTIC_LOG_LINES)
 
 const val MAX_DIAGNOSTIC_LOG_LINES = 80
+const val MAX_DIAGNOSTIC_STAGES = 20

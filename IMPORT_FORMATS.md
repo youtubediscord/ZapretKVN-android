@@ -5,7 +5,7 @@
 
 | Поле | Значение |
 |---|---|
-| Статус | Clash YAML исследован и отложен; новые extended URI требуют реальных образцов |
+| Статус | WireGuard/AmneziaWG `.conf` реализован; Clash YAML исследован и отложен |
 | Последний аудит | 22 июля 2026 года |
 | Ядро | `sing-box-extended` `ff11f007ec798136a5de258f947a4f34011a37ea` |
 | Источник сетевой истины | Только итоговый sing-box JSON профиля |
@@ -20,16 +20,54 @@
 - неизвестное поле или тип нельзя молча отбросить и показать импорт успешным;
 - исходный YAML не хранится и не участвует в runtime;
 - перед сохранением итог проходит native `Libbox.CheckConfig()`;
+- перед запуском сохранённый JSON может получить только явно документированные runtime overlays из DNS/Routing/VPN Hiding ADR; stored profile при этом не переписывается;
 - URL обновляется только вручную, без фонового scheduler;
 - секреты маскируются в preview, ошибках, логах и диагностике.
 
 ## Форматы MVP
 
 - полный sing-box JSON;
+- нативный WireGuard и AmneziaWG 2.0 INI `.conf`;
 - JSON/raw/base64 subscription, который уже распознаёт реализованный importer;
 - VLESS, VMess, Trojan, Shadowsocks, Hysteria2 и TUIC URI;
 - URL, QR, буфер обмена и системный file picker как способы доставки тех же
   данных.
+
+## F-IMPORT-WG — WireGuard и AmneziaWG 2.0 `.conf`
+
+Импорт является прямым преобразованием INI в единственный сохраняемый sing-box
+JSON. Отдельный WireGuard-процесс, локальный SOCKS и второй VPN не создаются.
+Поскольку закреплённый sing-box 1.13 использует новую схему, результат содержит
+`wireguard` в верхнеуровневом `endpoints`, а не deprecated outbound:
+
+- `[Interface] PrivateKey`, `Address`, `ListenPort`, `MTU` переходят в endpoint;
+- `[Peer] PublicKey`, `PresharedKey`, `Endpoint`, `AllowedIPs` и
+  `PersistentKeepalive` переходят в `peers`;
+- AWG `Jc`, `Jmin`, `Jmax`, `S1`…`S4`, `H1`…`H4` и AWG 2.0 `I1`…`I5`
+  переходят в нативный объект `amnezia`;
+- `AllowedIPs` становятся одновременно peer policy и явным sing-box route
+  rule; остальной трафик идёт в `direct`, как при split-tunnel WireGuard;
+- числовые `DNS` становятся sing-box UDP DNS; сервер направляется через endpoint
+  только если он входит в `AllowedIPs`. Для bootstrap имени `Endpoint`
+  используется системный DNS underlying-сети;
+- исходный INI после preview не хранится.
+
+Private/public/pre-shared keys принимаются только как стандартный Base64 ровно
+32 байт и записываются обратно в каноническом виде с `=` padding. Числовые
+поля AWG ограничены UInt16, а `Jmin` не может превышать `Jmax`. `H1`…`H4`
+принимают UInt32 либо диапазон `A-B`. Непустые `I1`…`I5` проверяются как цепочки
+AWG 2.0 тегов (`b`, `c`, `t`, `r`, `rc`, `rd`, `d`, `ds`, `dz`). Пустые
+`I2`…`I5` допустимы и не попадают в JSON.
+
+Неизвестные секции и параметры, повторные scalar keys, hostname/search-domain в
+`DNS`, `PostUp`/`Table`/`FwMark`, `IncludedApplications` и
+`ExcludedApplications` завершают импорт явной ошибкой: их нельзя молча потерять
+или исполнять. Per-app область настраивается только в UI Zapret KVN.
+
+Схема сверена с
+[option закреплённого core](https://github.com/shtorm-7/sing-box-extended/blob/ff11f007ec798136a5de258f947a4f34011a37ea/option/wireguard.go),
+[примером Amnezia endpoint](https://github.com/shtorm-7/sing-box-extended/blob/ff11f007ec798136a5de258f947a4f34011a37ea/examples/amnezia/client.json)
+и [parser AmneziaWG Android `2.0.0`](https://github.com/amnezia-vpn/amneziawg-android/blob/4116c836241f737badb99dcd4e990600d46e4c65/tunnel/src/main/java/org/amnezia/awg/config/Interface.java).
 
 ## F-IMPORT-01 — Clash YAML
 
@@ -83,9 +121,10 @@ Clash YAML не поддерживать. Не добавлять Kotlin YAML pa
 
 До нового протокола приоритетнее закрывать подтверждённые реальными ссылками
 пробелы уже заявленных форматов: VLESS XHTTP, Shadowsocks plugin, aliases и
-дополнительные параметры TUIC/Hysteria2. AnyTLS, SSH, ShadowTLS, WireGuard и
-другие outbounds ядра не считаются URI-форматами только потому, что существуют
-в JSON: без зафиксированного URI contract их синтаксис не придумывается.
+дополнительные параметры TUIC/Hysteria2. AnyTLS, SSH, ShadowTLS и другие
+outbounds ядра не считаются URI-форматами только потому, что существуют в JSON:
+без зафиксированного URI contract их синтаксис не придумывается. WireGuard/AWG
+поддерживается отдельно только в нативном INI `.conf`, а не в придуманном URI.
 
 Hysteria v1 можно включить, когда есть минимум три обезличенных реально
 неподдержанных URI от пользователей, golden-тесты всех встреченных вариантов,
@@ -101,6 +140,7 @@ format, но это не extended URI. Его также нельзя объяв
 
 | Формат | Статус | Следующий gate |
 |---|---|---|
+| WireGuard / AmneziaWG 2.0 `.conf` | Реализован как sing-box endpoint | Device connection test с реальным обезличенным WG и AWG 2.0 сервером |
 | Clash YAML `proxies` | Отложен, не входит в MVP | libbox binding + 10 реальных образцов + отсутствие silent drop |
 | Hysteria v1 URI | Первый кандидат | 3 обезличенных URI + native/device tests |
 | Расширения текущих URI | Приоритет по фактическим ошибкам | Реальный образец + golden/native test на каждый вариант |

@@ -46,7 +46,7 @@ Workflow восстанавливает JKS только во временный
 Среда `release` должна иметь обязательного reviewer. Workflow запускается только вручную
 для уже существующего tag; оператор ставит `final_gate_approved=true` лишь после закрытия
 всех пунктов «Финальный gate» в `IMPLEMENTATION_PLAN.md`, физической матрицы
-`GATE8_RESULTS.md` и проверки production-signed arm64 APK на реальном устройстве. Push tag
+`GATE8_RESULTS.md` и проверки production-signed ABI-specific APK на реальном устройстве. Push tag
 сам по себе ничего не публикует.
 
 - stable tag: `vMAJOR.MINOR.PATCH`;
@@ -55,6 +55,6 @@ Workflow восстанавливает JKS только во временный
   той же версии;
 - опубликованные assets не заменяются: исправление выпускается только новым tag.
 
-Release workflow публикует подписанный arm64 APK, отдельный `.sha256` и
-`release-metadata.json` с package, version, точным commit ядра, signing fingerprint и
+Release workflow публикует подписанные `arm64-v8a`, `armeabi-v7a`, `x86_64` APK, отдельные `.sha256` и
+`release-metadata-v2.json` с package, version, точным commit ядра, signing fingerprint и
 размером APK.

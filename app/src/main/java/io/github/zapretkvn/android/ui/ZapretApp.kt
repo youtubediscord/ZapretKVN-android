@@ -169,6 +169,19 @@ fun ZapretApp(
             routingViewModel.consumeMessage()
         }
     }
+    LaunchedEffect(
+        state.importCompletion,
+        appsState.initialized,
+        appsState.needsAppSelection,
+    ) {
+        if (
+            state.importCompletion != null &&
+            appsState.initialized &&
+            !appsState.needsAppSelection
+        ) {
+            profilesViewModel.consumeImportCompletion()
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -219,6 +232,7 @@ fun ZapretApp(
                 contentPadding = contentPadding,
                 state = state,
                 viewModel = profilesViewModel,
+                showAppSelectionAfterImport = appsState.needsAppSelection,
                 onOpenAppPicker = {
                     appsViewModel.refresh()
                     appPickerOpen = true
@@ -262,6 +276,7 @@ private fun ProfilesScreen(
     contentPadding: PaddingValues,
     state: ProfilesUiState,
     viewModel: ProfilesViewModel,
+    showAppSelectionAfterImport: Boolean,
     onOpenAppPicker: () -> Unit,
 ) {
     var deleteTarget by remember { mutableStateOf<ProfileMetadata?>(null) }
@@ -314,7 +329,7 @@ private fun ProfilesScreen(
                         modifier = Modifier.semantics { heading() },
                     )
                     Text(
-                        "JSON, ссылка или подписка сначала проходят preview и проверку ядром.",
+                        "JSON, WireGuard/AWG .conf, ссылка или подписка проходят preview и проверку ядром.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -325,7 +340,13 @@ private fun ProfilesScreen(
                         Button(
                             onClick = {
                                 fileLauncher.launch(
-                                    arrayOf("application/json", "text/plain", "application/octet-stream"),
+                                    arrayOf(
+                                        "application/json",
+                                        "application/x-wireguard-profile",
+                                        "application/x-amneziawg-profile",
+                                        "text/plain",
+                                        "application/octet-stream",
+                                    ),
                                 )
                             },
                             enabled = !state.busy,
@@ -477,14 +498,15 @@ private fun ProfilesScreen(
         )
     }
 
-    state.importCompletion?.let { completion ->
+    state.importCompletion?.takeIf { showAppSelectionAfterImport }?.let { completion ->
         AlertDialog(
             onDismissRequest = viewModel::consumeImportCompletion,
             title = { Text("Профиль готов") },
             text = {
                 Text(
                     "${completion.profileName} сохранён. VPN не запускался. " +
-                        "Выберите приложения, затем подключитесь вручную на главной.",
+                        "Для VPN не выбрано ни одного приложения. Выберите хотя бы одно, " +
+                        "затем подключитесь вручную на главной.",
                 )
             },
             confirmButton = {

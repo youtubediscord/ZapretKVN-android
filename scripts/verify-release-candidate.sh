@@ -4,6 +4,7 @@ set -euo pipefail
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APK="${1:-$PROJECT_ROOT/app/build/outputs/apk/release/app-release-unsigned.apk}"
 MAPPING="${2:-$PROJECT_ROOT/app/build/outputs/mapping/release/mapping.txt}"
+EXPECTED_ABI="${3:-}"
 REPORT_DIR="${ZAPRET_RC_REPORT_DIR:-$PROJECT_ROOT/build/release-candidate}"
 SYMBOL_ZIP="$PROJECT_ROOT/core-build/output/native-debug-symbols.zip"
 SYMBOL_METADATA="$PROJECT_ROOT/core-build/output/native-symbols-metadata.json"
@@ -123,19 +124,46 @@ SYMBOL_SIZE="$(stat -c '%s' "$SYMBOL_ZIP")"
 (( MAPPING_SIZE >= 1024 )) || { echo "R8 mapping is unexpectedly small" >&2; exit 1; }
 grep -Fq 'io.github.zapretkvn.android' "$MAPPING"
 
-unzip -p "$APK" lib/arm64-v8a/libbox.so > "$TEMP_DIR/libbox.so"
-readelf -S "$TEMP_DIR/libbox.so" | grep -Fq '.gopclntab'
-if readelf -S "$TEMP_DIR/libbox.so" | grep -Fq '.symtab'; then
-    echo "Packaged production libbox must be stripped" >&2
+mapfile -t NATIVE_ABIS < <(
+    unzip -Z1 "$APK" \
+        | sed -n 's#^lib/\([^/]*\)/.*\.so$#\1#p' \
+        | sort -u
+)
+mapfile -t NATIVE_LIBS < <(unzip -Z1 "$APK" | grep -E '^lib/[^/]+/[^/]+\.so$' | sort)
+if [[ "${#NATIVE_ABIS[@]}" -ne 1 ]]; then
+    echo "Release APK must contain exactly one native ABI: ${NATIVE_ABIS[*]:-none}" >&2
     exit 1
 fi
-unzip -tq "$SYMBOL_ZIP"
-unzip -p "$SYMBOL_ZIP" arm64-v8a/libbox.so > "$TEMP_DIR/libbox-symbols.so"
-readelf -S "$TEMP_DIR/libbox-symbols.so" | grep -Fq '.symtab'
-readelf -S "$TEMP_DIR/libbox-symbols.so" | grep -Fq '.debug_info'
-jq -e --arg commit "$CORE_COMMIT" '
-  .core_commit == $commit and .abi == "arm64-v8a" and .loadable_sections_exact == true
-' "$SYMBOL_METADATA" >/dev/null
+ABI="${NATIVE_ABIS[0]}"
+if [[ -n "$EXPECTED_ABI" && "$ABI" != "$EXPECTED_ABI" ]]; then
+    echo "Release APK ABI mismatch: expected $EXPECTED_ABI, got $ABI" >&2
+    exit 1
+fi
+case "$ABI" in
+    arm64-v8a|armeabi-v7a|x86_64) ;;
+    *) echo "Unsupported release APK ABI: $ABI" >&2; exit 1 ;;
+esac
+
+unzip -p "$APK" "lib/$ABI/libbox.so" > "$TEMP_DIR/libbox.so"
+[[ -s "$TEMP_DIR/libbox.so" ]]
+readelf -S "$TEMP_DIR/libbox.so" | grep -Fq '.gopclntab'
+for native_lib in "${NATIVE_LIBS[@]}"; do
+    extracted="$TEMP_DIR/${native_lib//\//_}"
+    unzip -p "$APK" "$native_lib" > "$extracted"
+    if readelf -S "$extracted" | grep -Fq '.symtab'; then
+        echo "Packaged production native library must be stripped: $native_lib" >&2
+        exit 1
+    fi
+done
+if [[ "$ABI" == arm64-v8a ]]; then
+    unzip -tq "$SYMBOL_ZIP"
+    unzip -p "$SYMBOL_ZIP" arm64-v8a/libbox.so > "$TEMP_DIR/libbox-symbols.so"
+    readelf -S "$TEMP_DIR/libbox-symbols.so" | grep -Fq '.symtab'
+    readelf -S "$TEMP_DIR/libbox-symbols.so" | grep -Fq '.debug_info'
+    jq -e --arg commit "$CORE_COMMIT" '
+      .core_commit == $commit and .abi == "arm64-v8a" and .loadable_sections_exact == true
+    ' "$SYMBOL_METADATA" >/dev/null
+fi
 
 SIGNED=false
 SIGNER_SHA256=""
@@ -186,7 +214,8 @@ jq -n \
     --argjson signed "$SIGNED" \
     --arg signer_sha256 "$SIGNER_SHA256" \
     --arg core_commit "$CORE_COMMIT" \
-    '{apk:$apk,apk_sha256:$apk_sha256,apk_size:$apk_size,r8_mapping_sha256:$mapping_sha256,r8_mapping_size:$mapping_size,native_symbols_sha256:$symbols_sha256,native_symbols_size:$symbols_size,signed:$signed,signer_sha256:$signer_sha256,core_commit:$core_commit,debuggable:false,cleartext:false,manifest_allowlist:true,secret_canaries_absent:true}' \
-    > "$REPORT_DIR/security-report.json"
+    --arg abi "$ABI" \
+    '{apk:$apk,abi:$abi,apk_sha256:$apk_sha256,apk_size:$apk_size,r8_mapping_sha256:$mapping_sha256,r8_mapping_size:$mapping_size,native_symbols_sha256:$symbols_sha256,native_symbols_size:$symbols_size,signed:$signed,signer_sha256:$signer_sha256,core_commit:$core_commit,debuggable:false,cleartext:false,manifest_allowlist:true,secret_canaries_absent:true}' \
+    > "$REPORT_DIR/security-report-$ABI.json"
 
-echo "Release candidate security audit passed: $REPORT_DIR/security-report.json"
+echo "Release candidate security audit passed: $REPORT_DIR/security-report-$ABI.json"

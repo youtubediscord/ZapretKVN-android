@@ -22,6 +22,7 @@ import java.net.Socket
 import java.net.URL
 import java.util.concurrent.ThreadLocalRandom
 import javax.net.ssl.HttpsURLConnection
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
@@ -32,6 +33,15 @@ data class HealthCheckResult(
     val pingMillis: Long?,
     val externalIpProbeAllowed: Boolean,
 )
+
+enum class VpnHealthStage(
+    val diagnosticKey: String,
+    val diagnosticLabel: String,
+) {
+    AwaitVpnNetwork("vpn_network", "Ожидание VPN-сети Android"),
+    DnsProbe("dns_probe", "DNS-проверка через TUN"),
+    HttpsProbe("https_probe", "HTTPS-проверка через VPN"),
+}
 
 data class PreparedBootstrap(
     val target: ProxyBootstrapTarget?,
@@ -61,10 +71,12 @@ class ProxyBootstrapper(
             return PreparedBootstrap(target, literal, now)
         }
         val lkg = cache.find(profileId, target.hostname, now)
-        val resolved = runCatching {
-            withTimeout(BOOTSTRAP_TIMEOUT_MILLIS) {
-                resolver.resolve(underlying, target.hostname, noCacheLookup)
-            }
+        val resolved = try {
+            Result.success(resolver.resolve(underlying, target.hostname, noCacheLookup))
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Throwable) {
+            Result.failure(error)
         }
         if (resolved.isSuccess) {
             val addresses = resolved.getOrThrow()
@@ -86,10 +98,7 @@ class ProxyBootstrapper(
                 return PreparedBootstrap(target, cached, lkg.resolvedAtEpochMillis, lkg.overlay(target))
             }
         }
-        throw IllegalStateException(
-            "Не удалось разрешить адрес VPN-сервера через системный/Private DNS.",
-            resolved.exceptionOrNull(),
-        )
+        throw checkNotNull(resolved.exceptionOrNull())
     }
 
     suspend fun recordSuccess(profileId: String, prepared: PreparedBootstrap) {
@@ -129,7 +138,6 @@ class ProxyBootstrapper(
     )
 
     private companion object {
-        const val BOOTSTRAP_TIMEOUT_MILLIS = 5_000L
         const val SOCKET_TIMEOUT_MILLIS = 1_500
         const val MAX_SOCKET_CANDIDATES = 3
         val IPV4 = Regex("(?:\\d{1,3}\\.){3}\\d{1,3}")
@@ -141,7 +149,12 @@ class VpnHealthPipeline(context: Context) {
         .getSystemService(ConnectivityManager::class.java)
     private val resolver = BootstrapResolver()
 
-    suspend fun verify(mode: DnsMode, internalDnsServer: String): HealthCheckResult {
+    suspend fun verify(
+        mode: DnsMode,
+        internalDnsServer: String,
+        onStage: (VpnHealthStage) -> Unit = {},
+    ): HealthCheckResult {
+        onStage(VpnHealthStage.AwaitVpnNetwork)
         if (VpnTestHooks.consumeHealthFailureOverride()) {
             error("Тестовая ошибка health-check DNS/HTTPS.")
         }
@@ -153,6 +166,7 @@ class VpnHealthPipeline(context: Context) {
             check(connectivity.activeNetwork == vpnNetwork) {
                 "VPN ещё не стал сетью по умолчанию для health-check UID."
             }
+            onStage(VpnHealthStage.DnsProbe)
             if (VpnTestHooks.consumeDnsProbeFailure()) {
                 error("DNS через VPN не отвечает: тестовый внутренний DNS недоступен.")
             }
@@ -167,6 +181,7 @@ class VpnHealthPipeline(context: Context) {
                         )
                 }
             }
+            onStage(VpnHealthStage.HttpsProbe)
             if (VpnTestHooks.consumeHttpsProbeFailure()) {
                 error("HTTPS-проверка через VPN не прошла: тестовый endpoint недоступен.")
             }

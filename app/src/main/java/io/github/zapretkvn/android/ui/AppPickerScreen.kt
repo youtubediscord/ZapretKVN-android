@@ -73,7 +73,15 @@ fun AppPickerScreen(
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
-                title = { Text("Приложения") },
+                title = {
+                    Text(
+                        if (state.scopeMode == AppScopeMode.Include) {
+                            "Приложения для VPN"
+                        } else {
+                            "Приложения напрямую"
+                        },
+                    )
+                },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад")
@@ -129,13 +137,15 @@ fun AppPickerScreen(
                         if (state.scopeMode == AppScopeMode.Include) {
                             "В VPN: ${state.allowedPackages.size}"
                         } else {
-                            "Исключено из VPN: ${state.allowedPackages.size}"
+                            "Напрямую вне VPN: ${state.allowedPackages.size}"
                         },
                         style = MaterialTheme.typography.titleMedium,
                     )
                     if (state.scopeMode == AppScopeMode.Exclude) {
                         Text(
-                            "Расширенный режим: отмеченные приложения идут напрямую, все остальные — через VPN. Пустой список заблокирован.",
+                            "Отмеченные приложения используют обычную сеть Android вне VPN и TUN; " +
+                                "все остальные идут через VPN. Глобальный tun0 при этом может оставаться видимым. " +
+                                "Пустой список заблокирован.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.error,
                         )

@@ -1,5 +1,7 @@
 package io.github.zapretkvn.android.config
 
+import io.github.zapretkvn.android.hardening.TunMtuMode
+import io.github.zapretkvn.android.hardening.VpnHidingOptions
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -17,6 +19,50 @@ import io.github.zapretkvn.android.routing.RoutingPreset
 import io.github.zapretkvn.android.routing.RoutingRuleAction
 
 class RuntimeConfigBuilderTest {
+    @Test
+    fun `rootless hardening protects raw profiles and can be explicitly disabled`() {
+        val raw = validConfig(
+            rootExtra = """
+                ,"experimental":{"clash_api":{"external_controller":"127.0.0.1:9090"}}
+            """.trimIndent(),
+        )
+            .replace("\"tag\":\"zapret-proxy\"", "\"tag\":\"user-selector\"")
+            .replace("\"final\":\"zapret-proxy\"", "\"final\":\"user-selector\"")
+            .replace(
+                "\"inbounds\":[{",
+                "\"inbounds\":[{\"type\":\"mixed\",\"listen\":\"127.0.0.1\",\"listen_port\":1080},{",
+            )
+
+        val protected = RuntimeConfigBuilder.build(raw)
+        val advanced = RuntimeConfigBuilder.build(
+            raw,
+            options = RuntimeConfigOptions(
+                vpnHiding = VpnHidingOptions(blockLocalEndpoints = false),
+            ),
+        )
+
+        assertTrue(protected is RuntimeConfigResult.Invalid)
+        assertTrue((protected as RuntimeConfigResult.Invalid).message.contains("localhost"))
+        assertTrue(advanced is RuntimeConfigResult.Ready)
+        assertTrue("external_controller" in (advanced as RuntimeConfigResult.Ready).json)
+    }
+
+    @Test
+    fun `mtu normalization changes only effective runtime`() {
+        val stored = validConfig()
+        val result = RuntimeConfigBuilder.build(
+            stored,
+            options = RuntimeConfigOptions(
+                vpnHiding = VpnHidingOptions(tunMtuMode = TunMtuMode.Normalize1500),
+            ),
+        ) as RuntimeConfigResult.Ready
+        val root = JsonConfig.parse(result.json) as JsonObject
+        val tun = (root["inbounds"] as JsonArray).single() as JsonObject
+
+        assertEquals("1500", (tun["mtu"] as JsonPrimitive).content)
+        assertFalse("stored profile must not gain an MTU", "\"mtu\"" in stored)
+    }
+
     @Test
     fun `runtime copy owns logging packages and managed interrupt without mutating source`() {
         val stored = validConfig(

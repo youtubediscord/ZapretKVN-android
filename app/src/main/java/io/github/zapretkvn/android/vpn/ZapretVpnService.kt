@@ -23,7 +23,9 @@ import io.github.zapretkvn.android.config.RuntimeConfigBuilder
 import io.github.zapretkvn.android.diagnostics.EffectiveOverlaySummary
 import io.github.zapretkvn.android.diagnostics.SecretRedactor
 import io.github.zapretkvn.android.config.RuntimeConfigResult
+import io.github.zapretkvn.android.hardening.VpnRuntimeHardening
 import io.github.zapretkvn.android.routing.RoutingConfigEditor
+import io.github.zapretkvn.networkbootstrap.CodedFailure
 import io.nekohasekai.libbox.CommandClient
 import io.nekohasekai.libbox.CommandClientHandler
 import io.nekohasekai.libbox.CommandClientOptions
@@ -124,6 +126,7 @@ class ZapretVpnService : VpnService() {
 
     override fun onRevoke() {
         cancelScheduledNetworkRestart()
+        controller.cancelCurrentConnectionDiagnostic()
         val token = controller.nextGeneration()
         terminalError = true
         controller.publish(token, VpnConnectionState.Stopping(activeSession?.profileId))
@@ -141,6 +144,7 @@ class ZapretVpnService : VpnService() {
 
     override fun onDestroy() {
         cancelScheduledNetworkRestart()
+        controller.cancelCurrentConnectionDiagnostic()
         runBlocking {
             serviceLock.withLock {
                 activeSession?.close()
@@ -158,6 +162,8 @@ class ZapretVpnService : VpnService() {
     private fun requestStart(profileId: String, startId: Int) {
         val token = controller.nextGeneration()
         terminalError = false
+        controller.beginConnectionDiagnostic(token, "user_start")
+        controller.startConnectionDiagnosticStage(token, "profile", "Профиль и область приложений")
         controller.publish(token, VpnConnectionState.Starting(profileId, "Проверка профиля"))
         showForeground(ForegroundNotificationState.ValidatingProfile)
         serviceScope.launch {
@@ -196,7 +202,9 @@ class ZapretVpnService : VpnService() {
                 profile = container.profileStore.read(profileId)
             }
         }
-        val dnsMode = container.uiSettingsStore.settings.first().dnsMode
+        val uiSettings = container.uiSettingsStore.settings.first()
+        val dnsMode = uiSettings.dnsMode
+        val vpnHiding = uiSettings.vpnHiding
         val appSelection = container.appSelectionStore.selection.first()
         val selectedPackages = appSelection.allowedPackages
         val preflight = container.vpnAppScopePreflight.apply(
@@ -206,64 +214,72 @@ class ZapretVpnService : VpnService() {
             disallowedSink = DisallowedApplicationSink { },
         )
         val effectivePackages = when (preflight) {
-            is VpnAppScopeResult.Ready -> preflight.effectivePackages
+            is VpnAppScopeResult.Ready -> {
+                if (preflight.skippedPackages.isNotEmpty()) {
+                    controller.publishDiagnosticWarning(
+                        "Пропущены недоступные приложения: " +
+                            preflight.skippedPackages.joinToString(),
+                    )
+                }
+                preflight.effectivePackages
+            }
             VpnAppScopeResult.EmptyAllowlist -> error(
                 if (appSelection.mode == AppScopeMode.Include) {
                     "Выберите хотя бы одно приложение для VPN."
                 } else {
-                    "В режиме исключений нужен хотя бы один пакет; пустой список заблокирован."
+                    "Выберите хотя бы одно приложение для прямого доступа вне VPN; пустой список заблокирован."
                 },
             )
             is VpnAppScopeResult.MissingApplications -> error(
-                "Выбранные приложения больше не доступны: ${preflight.packageNames.joinToString()}.",
+                "Не осталось доступных выбранных приложений. Выберите хотя бы одно.",
             )
             is VpnAppScopeResult.BuilderFailure -> error(
                 "Android отклонил приложение ${preflight.packageName}: ${preflight.reason}",
             )
         }
 
+        controller.startConnectionDiagnosticStage(token, "android_network", "Сеть и политика Android")
         controller.publish(token, VpnConnectionState.Starting(profileId, "Проверка сети Android"))
         showForeground(ForegroundNotificationState.CheckingNetwork)
         val networkMonitor = DefaultNetworkMonitor(this).also(DefaultNetworkMonitor::start)
-        var underlying = try {
-            networkMonitor.awaitUnderlying()
-        } catch (error: Throwable) {
-            networkMonitor.close()
-            throw IllegalStateException("Нет активной underlying сети Android.", error)
-        }
-        if (VpnTestHooks.consumeCaptivePortalOverride()) {
-            underlying = underlying.copy(captivePortal = true, validated = false)
-        }
-        controller.publishDiagnosticNetwork(token, underlying)
-        if (underlying.captivePortal) {
-            networkMonitor.close()
-            error("Интернет требует авторизации в Wi-Fi.")
-        }
-        if (underlying.privateDnsMode == PrivateDnsMode.Strict &&
-            (dnsMode == DnsMode.Automatic || dnsMode == DnsMode.Secure)
-        ) {
-            networkMonitor.close()
-            error("Strict Private DNS несовместим с этим режимом. Выберите «DNS Android» или «Из JSON».")
-        }
-        if (underlying.privateDnsMode == PrivateDnsMode.Strict &&
-            dnsMode == DnsMode.Android &&
-            (!underlying.privateDnsActive || !underlying.validated)
-        ) {
-            networkMonitor.close()
-            error("Strict Private DNS не отвечает. Исправьте системную настройку или выберите «Из JSON».")
-        }
-        val preparedBootstrap = try {
-            container.proxyBootstrapper.prepare(
-                profileId = profileId,
-                rawJson = profile.json,
-                underlying = checkNotNull(underlying.network),
-                noCacheLookup = noCacheLookup,
-            )
+        controller.startConnectionDiagnosticStage(token, "bootstrap", "Bootstrap DNS и доступность сервера")
+        val networkBootstrap = try {
+            networkMonitor.runOnStableNetwork { candidate ->
+                val underlying = if (VpnTestHooks.consumeCaptivePortalOverride()) {
+                    candidate.copy(captivePortal = true, validated = false)
+                } else {
+                    candidate
+                }
+                controller.publishDiagnosticNetwork(token, underlying)
+                if (underlying.captivePortal) {
+                    error("Интернет требует авторизации в Wi-Fi.")
+                }
+                if (underlying.privateDnsMode == PrivateDnsMode.Strict &&
+                    (dnsMode == DnsMode.Automatic || dnsMode == DnsMode.Secure)
+                ) {
+                    error("Strict Private DNS несовместим с этим режимом. Выберите «DNS Android» или «Из JSON».")
+                }
+                if (underlying.privateDnsMode == PrivateDnsMode.Strict &&
+                    dnsMode == DnsMode.Android &&
+                    (!underlying.privateDnsActive || !underlying.validated)
+                ) {
+                    error("Strict Private DNS не отвечает. Исправьте системную настройку или выберите «Из JSON».")
+                }
+                container.proxyBootstrapper.prepare(
+                    profileId = profileId,
+                    rawJson = profile.json,
+                    underlying = checkNotNull(underlying.network),
+                    noCacheLookup = noCacheLookup,
+                )
+            }
         } catch (error: Throwable) {
             networkMonitor.close()
             throw error
         }
+        val underlying = networkBootstrap.network
+        val preparedBootstrap = networkBootstrap.value
 
+        controller.startConnectionDiagnosticStage(token, "runtime_config", "Runtime overlay")
         val runtimeJson = try {
             when (
                 val runtime = RuntimeConfigBuilder.build(
@@ -272,6 +288,7 @@ class ZapretVpnService : VpnService() {
                     options = RuntimeConfigOptions(
                         dnsMode = dnsMode,
                         bootstrapHost = preparedBootstrap.overlay,
+                        vpnHiding = vpnHiding,
                     ),
                 )
             ) {
@@ -286,6 +303,7 @@ class ZapretVpnService : VpnService() {
             token,
             EffectiveOverlaySummary.create(runtimeJson, dnsMode),
         )
+        controller.startConnectionDiagnosticStage(token, "check_config", "Проверка конфигурации ядром")
         controller.publish(token, VpnConnectionState.Starting(profileId, "Проверка sing-box"))
         showForeground(ForegroundNotificationState.ValidatingCore)
         try {
@@ -296,6 +314,7 @@ class ZapretVpnService : VpnService() {
             throw error
         }
 
+        controller.startConnectionDiagnosticStage(token, "core_tun", "Запуск core и создание TUN")
         controller.publish(token, VpnConnectionState.Starting(profileId, "Создание TUN"))
         showForeground(ForegroundNotificationState.CreatingTun)
         val resources = ActiveSession(
@@ -315,6 +334,7 @@ class ZapretVpnService : VpnService() {
                 expectedPackages = effectivePackages,
                 scopePreflight = container.vpnAppScopePreflight,
                 networkMonitor = networkMonitor,
+                sessionName = VpnRuntimeHardening.sessionName(vpnHiding),
             )
             resources.server = Libbox.newCommandServer(
                 ServerHandler(this),
@@ -351,8 +371,15 @@ class ZapretVpnService : VpnService() {
             showForeground(ForegroundNotificationState.CheckingHealth)
             val dnsServer = resources.platform?.internalDnsServer
                 ?: error("libbox не передал внутренний DNS TUN.")
-            val health = container.vpnHealthPipeline.verify(dnsMode, dnsServer)
+            val health = container.vpnHealthPipeline.verify(dnsMode, dnsServer) { stage ->
+                controller.startConnectionDiagnosticStage(
+                    token,
+                    stage.diagnosticKey,
+                    stage.diagnosticLabel,
+                )
+            }
             check(token == controller.currentGeneration()) { "Запуск отменён." }
+            controller.startConnectionDiagnosticStage(token, "finalize", "Финализация сессии")
             container.proxyBootstrapper.recordSuccess(profileId, preparedBootstrap)
             activeSession = resources
             resources.networkObserver = networkMonitor.observe { state ->
@@ -387,6 +414,7 @@ class ZapretVpnService : VpnService() {
         val token = controller.nextGeneration()
         serviceScope.launch {
             serviceLock.withLock {
+                if (token != controller.currentGeneration()) return@withLock
                 val targetProfile = activeSession?.profileId ?: profileId
                 if (targetProfile.isBlank()) {
                     controller.publishMessage("VPN выключен; перезапуск не требуется.")
@@ -395,6 +423,12 @@ class ZapretVpnService : VpnService() {
                     return@withLock
                 }
                 terminalError = false
+                controller.beginConnectionDiagnostic(token, "restart")
+                controller.startConnectionDiagnosticStage(
+                    token,
+                    "profile",
+                    "Профиль и область приложений",
+                )
                 controller.publish(token, VpnConnectionState.Starting(targetProfile, reason))
                 showForeground(ForegroundNotificationState.Restarting)
                 activeSession?.close()
@@ -455,6 +489,7 @@ class ZapretVpnService : VpnService() {
         systemPolicy: VpnSystemPolicy? = null,
     ) {
         cancelScheduledNetworkRestart()
+        controller.cancelCurrentConnectionDiagnostic()
         val token = controller.nextGeneration()
         systemPolicy?.let { controller.publishVpnSystemPolicy(token, it) }
         terminalError = errorMessage != null
@@ -500,6 +535,12 @@ class ZapretVpnService : VpnService() {
                     startConnectionIdentityProbe(session)
                 } catch (runtimeSwitchError: RuntimeSwitchException) {
                     val restartToken = controller.nextGeneration()
+                    controller.beginConnectionDiagnostic(restartToken, "server_switch_restart")
+                    controller.startConnectionDiagnosticStage(
+                        restartToken,
+                        "profile",
+                        "Профиль и область приложений",
+                    )
                     controller.publish(
                         restartToken,
                         VpnConnectionState.Starting(profileId, "Перезапуск после смены сервера"),
@@ -516,7 +557,7 @@ class ZapretVpnService : VpnService() {
                         }
                     }
                 } catch (validationError: Throwable) {
-                    controller.publishMessage(safeError(validationError))
+                    controller.publishMessage(safeError(validationError).message)
                     showForeground(ForegroundNotificationState.Connected)
                 }
             }
@@ -536,7 +577,7 @@ class ZapretVpnService : VpnService() {
                 .onSuccess { ping ->
                     if (activeSession === session) controller.publishPing(session.generation, ping)
                 }
-                .onFailure { controller.publishMessage("Не удалось измерить пинг: ${safeError(it)}") }
+                .onFailure { controller.publishMessage("Не удалось измерить пинг: ${safeError(it).message}") }
         }
     }
 
@@ -555,7 +596,7 @@ class ZapretVpnService : VpnService() {
                 require(groupTag.isNotBlank()) { "Группа серверов не выбрана." }
                 session.client?.urlTest(groupTag) ?: error("Клиент управления sing-box недоступен.")
             }.onFailure {
-                controller.publishMessage("Не удалось проверить серверы: ${safeError(it)}")
+                controller.publishMessage("Не удалось проверить серверы: ${safeError(it).message}")
             }
         }
     }
@@ -633,10 +674,10 @@ class ZapretVpnService : VpnService() {
         activeSession?.close()
         activeSession = null
         terminalError = true
-        val message = safeError(error)
+        val failure = safeError(error)
         finishForeground()
         if (startId > 0) stopSelfResult(startId) else stopSelf()
-        controller.publish(token, VpnConnectionState.Error(message))
+        controller.publish(token, failure)
     }
 
     internal fun requestStopFromCore() {
@@ -701,16 +742,28 @@ class ZapretVpnService : VpnService() {
         )
     }
 
-    private fun safeError(error: Throwable): String {
-        val raw = generateSequence(error) { it.cause }
+    private fun safeError(error: Throwable): VpnConnectionState.Error {
+        val causes = generateSequence(error) { it.cause }.toList()
+        val coded = causes.filterIsInstance<CodedFailure>().firstOrNull()
+        val raw = coded?.userMessage ?: causes
             .mapNotNull { it.message }
             .firstOrNull(String::isNotBlank)
             ?: "Не удалось запустить VPN."
-        return raw
+        val message = raw
             .let(SecretRedactor::redactInline)
             .replace(NEW_LINES, " ")
             .trim()
             .take(360)
+        val technicalDetail = coded?.technicalDetail
+            ?.let(SecretRedactor::redactInline)
+            ?.replace(NEW_LINES, " ")
+            ?.trim()
+            ?.take(240)
+        return VpnConnectionState.Error(
+            message = message,
+            code = coded?.failureCode.orEmpty(),
+            technicalDetail = technicalDetail,
+        )
     }
 
     private class ActiveSession(

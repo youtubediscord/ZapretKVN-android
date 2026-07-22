@@ -48,9 +48,19 @@ if [[ -n "$INVALID_ACTIONS" ]]; then
     exit 1
 fi
 
-MODULE_COUNT="$(find "$PROJECT_ROOT" -mindepth 2 -maxdepth 2 -name build.gradle.kts -printf '%h\n' | wc -l)"
-if [[ "$MODULE_COUNT" -ne 1 ]]; then
-    echo "Expected one Android module, found $MODULE_COUNT" >&2
+mapfile -t ANDROID_MODULES < <(
+    find "$PROJECT_ROOT" -mindepth 2 -maxdepth 2 -name build.gradle.kts -printf '%h\n' \
+        | sed "s|$PROJECT_ROOT/||" \
+        | sort
+)
+EXPECTED_ANDROID_MODULES=(app network-bootstrap wireguard-import)
+if [[ "${ANDROID_MODULES[*]}" != "${EXPECTED_ANDROID_MODULES[*]}" ]]; then
+    echo "Unexpected Android module set: ${ANDROID_MODULES[*]:-none}" >&2
+    exit 1
+fi
+if [[ "$(grep -l 'com.android.application' "$PROJECT_ROOT"/*/build.gradle.kts | wc -l)" -ne 1 ]] ||
+    ! grep -Fq 'com.android.application' "$PROJECT_ROOT/app/build.gradle.kts"; then
+    echo "Exactly app must be the Android application module" >&2
     exit 1
 fi
 
@@ -78,23 +88,26 @@ if grep -R -F 'CommandConnections' "$PROJECT_ROOT/app/src/main/java"; then
     exit 1
 fi
 
-python3 - "$PROJECT_ROOT/app/src/main/java" <<'PY'
+python3 - "$PROJECT_ROOT" <<'PY'
 from pathlib import Path
 import sys
 
 root = Path(sys.argv[1])
 delays = []
-for path in root.rglob("*.kt"):
-    count = path.read_text().count("delay(")
-    if count:
-        delays.append((str(path.relative_to(root)), count))
+for source in (root / "app/src/main/java", root / "network-bootstrap/src/main/java"):
+    for path in source.rglob("*.kt"):
+        count = path.read_text().count("delay(")
+        if count:
+            delays.append((str(path.relative_to(root)), count))
+delays.sort()
 expected = [
-    ("io/github/zapretkvn/android/ui/HomeScreen.kt", 1),
-    ("io/github/zapretkvn/android/vpn/ZapretVpnService.kt", 1),
+    ("app/src/main/java/io/github/zapretkvn/android/ui/HomeScreen.kt", 1),
+    ("app/src/main/java/io/github/zapretkvn/android/vpn/ZapretVpnService.kt", 1),
+    ("network-bootstrap/src/main/java/io/github/zapretkvn/networkbootstrap/UnderlyingNetworkMonitor.kt", 1),
 ]
 if delays != expected:
     raise SystemExit(f"Unexpected production timer/retry surface: {delays!r}")
-print("Production timers are limited to visible session time and one network debounce.")
+print("Production timers are limited to visible session time, network debounce and bootstrap settle.")
 PY
 
 python3 - "$MANIFEST" "$PROJECT_ROOT/app/src/main/res/xml/diagnostic_file_paths.xml" <<'PY'

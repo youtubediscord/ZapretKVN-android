@@ -20,9 +20,15 @@ object EffectiveOverlaySummary {
         val root = JsonConfig.parse(runtimeJson) as? JsonObject ?: error("Runtime JSON is not an object.")
         val dns = root["dns"] as? JsonObject
         val route = root["route"] as? JsonObject
-        val tun = (root["inbounds"] as? JsonArray)
+        val inbounds = (root["inbounds"] as? JsonArray)
             ?.mapNotNull { it as? JsonObject }
-            ?.singleOrNull { it.string("type") == "tun" }
+            .orEmpty()
+        val tun = inbounds.singleOrNull { it.string("type") == "tun" }
+        val experimental = root["experimental"] as? JsonObject
+        val clashApi = experimental?.get("clash_api") as? JsonObject
+        val localControlEndpointPresent =
+            clashApi?.keys?.any(CLASH_LISTENER_FIELDS::contains) == true ||
+                experimental?.get("v2ray_api") is JsonObject
 
         val managedDnsServers = (dns?.get("servers") as? JsonArray)
             ?.mapNotNull { it as? JsonObject }
@@ -56,6 +62,14 @@ object EffectiveOverlaySummary {
                         put("auto_route", tun?.boolean("auto_route") == true)
                         put("ipv4", tun.hasAddressFamily(ipv6 = false))
                         put("ipv6", tun.hasAddressFamily(ipv6 = true))
+                    },
+                )
+                put(
+                    "vpn_hiding",
+                    buildJsonObject {
+                        put("non_tun_inbound_count", inbounds.count { it.string("type") != "tun" })
+                        put("local_control_endpoint_present", localControlEndpointPresent)
+                        put("tun_mtu", tun?.string("mtu")?.toIntOrNull() ?: 0)
                     },
                 )
                 put(
@@ -132,6 +146,13 @@ object EffectiveOverlaySummary {
 
     private fun safeToken(value: String?): String =
         value?.takeIf { TOKEN.matches(it) }?.take(40) ?: "unknown"
+
+    private val CLASH_LISTENER_FIELDS = setOf(
+        "external_controller",
+        "external_controller_tls",
+        "external_ui",
+        "external_ui_download_url",
+    )
 
     private val TOKEN = Regex("[a-zA-Z0-9_-]+")
     private const val MANAGED_PREFIX = "zapret-"

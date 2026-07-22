@@ -99,7 +99,7 @@ internal fun HomeScreen(
                 ConnectionHeader(vpnState)
                 Text(
                     connected?.profileName ?: activeProfile?.name
-                    ?: "Добавьте профиль, затем выберите приложения для VPN.",
+                    ?: "Добавьте профиль для подключения.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
@@ -130,10 +130,17 @@ internal fun HomeScreen(
                         vpnState.message,
                         color = MaterialTheme.colorScheme.primary,
                     )
-                    is VpnConnectionState.Error -> Text(
-                        vpnState.message,
-                        color = MaterialTheme.colorScheme.error,
-                    )
+                    is VpnConnectionState.Error -> Column(
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Text(
+                            "Код: ${vpnState.code.ifBlank { "VPN-000" }}",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.error,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Text(vpnState.message, color = MaterialTheme.colorScheme.error)
+                    }
                     else -> Unit
                 }
 
@@ -154,7 +161,7 @@ internal fun HomeScreen(
             if (appScopeMode == AppScopeMode.Include) {
                 "Через VPN: $selectedAppCount приложений"
             } else {
-                "Напрямую: $selectedAppCount исключений"
+                "Напрямую вне VPN: $selectedAppCount приложений"
             },
             modifier = Modifier.padding(horizontal = 4.dp),
             style = MaterialTheme.typography.labelMedium,
@@ -334,7 +341,7 @@ private fun ConnectionAction(
                 if (appScopeMode == AppScopeMode.Include) {
                     "Выберите хотя бы одно приложение для VPN."
                 } else {
-                    "В режиме исключений выберите хотя бы одно приложение вне VPN."
+                    "Выберите хотя бы одно приложение для прямого доступа вне VPN."
                 },
                 color = MaterialTheme.colorScheme.error,
                 style = MaterialTheme.typography.bodySmall,
@@ -343,7 +350,13 @@ private fun ConnectionAction(
                 onClick = onSelectApps,
                 modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
             ) {
-                Text(if (appScopeMode == AppScopeMode.Include) "Выбрать приложения" else "Выбрать исключения")
+                Text(
+                    if (appScopeMode == AppScopeMode.Include) {
+                        "Выбрать приложения"
+                    } else {
+                        "Выбрать приложения напрямую"
+                    },
+                )
             }
         }
         else -> when (vpnState) {

@@ -10,6 +10,8 @@ import java.net.Inet6Address
 import java.net.InetAddress
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import io.github.zapretkvn.networkbootstrap.BootstrapFailureCode
+import io.github.zapretkvn.networkbootstrap.BootstrapFailureException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -125,12 +127,20 @@ class NetworkDnsInstrumentedTest {
                 )
                 VpnTestHooks.failNextBootstrapResolution()
                 val expired = runCatching { bootstrapper.prepare(profileId, rawJson, underlying) }.exceptionOrNull()
-                assertTrue("Expired LKG was unexpectedly accepted", expired is IllegalStateException)
+                assertEquals(
+                    "Expired LKG must preserve the typed DNS failure",
+                    BootstrapFailureCode.DnsSystem,
+                    (expired as? BootstrapFailureException)?.reason,
+                )
 
                 cache.removeProfile(profileId)
                 VpnTestHooks.failNextBootstrapResolution()
                 val missing = runCatching { bootstrapper.prepare(profileId, rawJson, underlying) }.exceptionOrNull()
-                assertTrue("Missing LKG was unexpectedly accepted", missing is IllegalStateException)
+                assertEquals(
+                    "Missing LKG must preserve the typed DNS failure",
+                    BootstrapFailureCode.DnsSystem,
+                    (missing as? BootstrapFailureException)?.reason,
+                )
             } finally {
                 VpnTestHooks.reset()
                 monitor.close()

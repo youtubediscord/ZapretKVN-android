@@ -53,16 +53,22 @@ import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
 import io.github.zapretkvn.android.BuildConfig
 import io.github.zapretkvn.android.config.DnsMode
+import io.github.zapretkvn.android.diagnostics.DiagnosticAttemptOutcome
 import io.github.zapretkvn.android.diagnostics.DiagnosticState
+import io.github.zapretkvn.android.diagnostics.DiagnosticStageStatus
+import io.github.zapretkvn.android.hardening.TunMtuMode
 import io.github.zapretkvn.android.profiles.ProfilesUiState
 import io.github.zapretkvn.android.profiles.ProfilesViewModel
 import io.github.zapretkvn.android.updates.UpdateState
 import io.github.zapretkvn.android.vpn.VpnConnectionState
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
+import java.text.DateFormat
+import java.util.Date
 
 private enum class SettingsDestination {
     Main,
+    VpnHiding,
     Diagnostics,
     Community,
     About,
@@ -100,6 +106,12 @@ fun SettingsScreen(
             onInstallUpdate = onInstallUpdate,
             onCancelUpdate = onCancelUpdate,
             onOpen = { destination = it },
+        )
+        SettingsDestination.VpnHiding -> VpnHidingSettings(
+            contentPadding = contentPadding,
+            state = state,
+            viewModel = viewModel,
+            onBack = goBack,
         )
         SettingsDestination.Diagnostics -> DiagnosticsSettings(
             contentPadding = contentPadding,
@@ -250,6 +262,12 @@ private fun SettingsMain(
         item(key = "sections") {
             ElevatedCard(modifier = Modifier.fillMaxWidth()) {
                 SettingsLinkRow(
+                    title = "Скрытие VPN",
+                    subtitle = "Rootless-защита от localhost-проб и экспериментальные параметры TUN",
+                    onClick = { onOpen(SettingsDestination.VpnHiding) },
+                )
+                HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+                SettingsLinkRow(
                     title = "Диагностика",
                     subtitle = "Состояние VPN, версии и обслуживание DNS",
                     onClick = { onOpen(SettingsDestination.Diagnostics) },
@@ -300,7 +318,11 @@ private fun UpdateControls(
         }
 
         is UpdateState.Available -> {
-            ReleaseSummary(state.candidate.metadata.versionName, state.candidate.metadata.coreTag)
+            ReleaseSummary(
+                state.candidate.metadata.versionName,
+                state.candidate.metadata.coreTag,
+                state.candidate.metadata.abi.single(),
+            )
             Button(
                 onClick = onDownload,
                 modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
@@ -313,7 +335,11 @@ private fun UpdateControls(
             } else {
                 0f
             }
-            ReleaseSummary(state.candidate.metadata.versionName, state.candidate.metadata.coreTag)
+            ReleaseSummary(
+                state.candidate.metadata.versionName,
+                state.candidate.metadata.coreTag,
+                state.candidate.metadata.abi.single(),
+            )
             LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth())
             Text(
                 "${formatUpdateBytes(state.downloadedBytes)} / ${formatUpdateBytes(state.totalBytes)}",
@@ -323,7 +349,11 @@ private fun UpdateControls(
         }
 
         is UpdateState.Ready -> {
-            ReleaseSummary(state.candidate.metadata.versionName, state.candidate.metadata.coreTag)
+            ReleaseSummary(
+                state.candidate.metadata.versionName,
+                state.candidate.metadata.coreTag,
+                state.candidate.metadata.abi.single(),
+            )
             Text("SHA-256, package, version и подпись проверены.")
             Button(
                 onClick = onInstall,
@@ -343,15 +373,133 @@ private fun UpdateControls(
 }
 
 @Composable
-private fun ReleaseSummary(versionName: String, coreTag: String) {
+private fun ReleaseSummary(versionName: String, coreTag: String, abi: String) {
     Text("Доступна версия $versionName", fontWeight = FontWeight.SemiBold)
-    Text("Core $coreTag · arm64-v8a", style = MaterialTheme.typography.bodySmall)
+    Text("Core $coreTag · $abi", style = MaterialTheme.typography.bodySmall)
 }
 
 private fun formatUpdateBytes(value: Long): String = when {
     value >= 1024 * 1024 -> "%.1f МБ".format(value / (1024.0 * 1024.0))
     value >= 1024 -> "%.1f КБ".format(value / 1024.0)
     else -> "$value Б"
+}
+
+@Composable
+private fun VpnHidingSettings(
+    contentPadding: PaddingValues,
+    state: ProfilesUiState,
+    viewModel: ProfilesViewModel,
+    onBack: () -> Unit,
+) {
+    val options = state.settings.vpnHiding
+    SettingsSubpage(contentPadding, "Скрытие VPN", onBack) {
+        SettingsCard(title = "Возможности rootless-режима") {
+            Text(
+                "Защита закрывает локальные proxy/API и уменьшает технические признаки. " +
+                    "Обычное приложение не может скрыть созданные Android TRANSPORT_VPN и TUN-интерфейс.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                "Здесь нет фонового сканирования, таймеров или дополнительного процесса.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
+        SettingsCard(title = "Защита от активных чекеров") {
+            VpnHidingSwitchRow(
+                title = "Блокировать localhost endpoints",
+                subtitle = "Удаляет Clash/V2Ray API и запрещает дополнительные SOCKS/HTTP/mixed inbounds в runtime.",
+                checked = options.blockLocalEndpoints,
+                onCheckedChange = viewModel::setVpnHidingBlockLocalEndpoints,
+                testTag = "vpn-hiding-local-endpoints",
+            )
+            if (!options.blockLocalEndpoints) {
+                Text(
+                    "Защита отключена: raw JSON сможет открыть локальный controller или proxy для других приложений.",
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            Text(
+                "Обход через Network.bindSocket не разрешается: VpnService.Builder.allowBypass() не используется.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
+        SettingsCard(title = "Экспериментальные признаки") {
+            VpnHidingSwitchRow(
+                title = "Нейтральное имя VPN-сессии",
+                subtitle = "Показывает «Системная сеть» вместо имени клиента в доступных Android-представлениях.",
+                checked = options.neutralSessionName,
+                onCheckedChange = viewModel::setVpnHidingNeutralSessionName,
+                testTag = "vpn-hiding-session-name",
+            )
+            HorizontalDivider()
+            Text("MTU TUN", fontWeight = FontWeight.Medium)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                TunMtuMode.entries.forEach { mode ->
+                    FilterChip(
+                        selected = options.tunMtuMode == mode,
+                        onClick = { viewModel.setVpnHidingTunMtuMode(mode) },
+                        label = { Text(mode.displayName()) },
+                        modifier = Modifier.testTag("vpn-hiding-mtu-${mode.name}"),
+                    )
+                }
+            }
+            Text(
+                options.tunMtuMode.description(),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
+        Text(
+            "Изменение параметров контролируемо перезапускает активное подключение. " +
+                "Сохранённый JSON профиля не переписывается.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+private fun VpnHidingSwitchRow(
+    title: String,
+    subtitle: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    testTag: String,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 64.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+            Text(title, fontWeight = FontWeight.Medium)
+            Text(
+                subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            modifier = Modifier
+                .testTag(testTag)
+                .semantics { contentDescription = title },
+        )
+    }
 }
 
 @Composable
@@ -370,6 +518,8 @@ private fun DiagnosticsSettings(
     }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    var timelineExpanded by rememberSaveable { mutableStateOf(false) }
+    var crashExpanded by rememberSaveable { mutableStateOf(false) }
     var logsExpanded by rememberSaveable { mutableStateOf(false) }
     var overlayExpanded by rememberSaveable { mutableStateOf(false) }
     var exporting by remember { mutableStateOf(false) }
@@ -400,13 +550,126 @@ private fun DiagnosticsSettings(
                     Text("Ошибок текущего запуска нет.")
                 } else {
                     Text(
-                        failure.type.title,
+                        "${failure.supportCode} · ${failure.type.title}",
                         modifier = Modifier.testTag("diagnostic-error-type"),
                         color = MaterialTheme.colorScheme.error,
                         fontWeight = FontWeight.SemiBold,
                     )
                     Text(failure.message, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    failure.technicalDetail?.let { detail ->
+                        Text(
+                            "Технически: $detail",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
+            }
+        }
+        ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier.padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text("Время подключения", style = MaterialTheme.typography.titleMedium)
+                val attempt = diagnostics.connectionAttempt
+                if (attempt == null) {
+                    Text("Замеры появятся после следующей попытки подключения.")
+                } else {
+                    Text(
+                        attempt.outcome.diagnosticLabel(attempt.totalDurationMillis),
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (attempt.outcome == DiagnosticAttemptOutcome.Failed) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            MaterialTheme.colorScheme.onSurface
+                        },
+                    )
+                    attempt.stages.lastOrNull { it.status == DiagnosticStageStatus.Running }?.let { stage ->
+                        Text(
+                            "Сейчас: ${stage.label}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    attempt.slowestCompletedStage?.let { stage ->
+                        Text(
+                            "Самый долгий этап: ${stage.label} — ${formatDiagnosticDuration(stage.durationMillis)}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.testTag("diagnostic-slowest-stage"),
+                        )
+                    }
+                    OutlinedButton(
+                        onClick = { timelineExpanded = !timelineExpanded },
+                        modifier = Modifier.testTag("diagnostic-timeline-toggle"),
+                    ) {
+                        Text(if (timelineExpanded) "Скрыть этапы" else "Показать этапы (${attempt.stages.size})")
+                    }
+                    if (timelineExpanded) {
+                        Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                            attempt.stages.forEach { stage ->
+                                Text(
+                                    "${stage.status.symbol()} ${stage.label} — " +
+                                        (stage.durationMillis?.let(::formatDiagnosticDuration) ?: "выполняется"),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = if (stage.status == DiagnosticStageStatus.Failed) {
+                                        MaterialTheme.colorScheme.error
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                    },
+                                )
+                            }
+                        }
+                    }
+                }
+                Text(
+                    "Замеры делаются только на событиях запуска: без таймера, polling и фонового трафика.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier.padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text("Предыдущий crash приложения", style = MaterialTheme.typography.titleMedium)
+                val crash = diagnostics.previousCrash
+                if (crash == null) {
+                    Text("Сохранённого Kotlin/Java crash нет.")
+                } else {
+                    Text(
+                        crash.exceptionType,
+                        color = MaterialTheme.colorScheme.error,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.testTag("diagnostic-previous-crash"),
+                    )
+                    Text(formatDiagnosticTimestamp(crash.occurredAtEpochMillis))
+                    crash.message?.let {
+                        Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    if (crash.stack.isNotEmpty()) {
+                        OutlinedButton(onClick = { crashExpanded = !crashExpanded }) {
+                            Text(if (crashExpanded) "Скрыть стек" else "Показать короткий стек")
+                        }
+                    }
+                    if (crashExpanded) {
+                        Text(
+                            crash.stack.joinToString("\n") { frame ->
+                                "${frame.className}.${frame.methodName}:${frame.lineNumber}"
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            fontFamily = FontFamily.Monospace,
+                        )
+                    }
+                }
+                Text(
+                    "Хранится только один redacted crash без сетевого runtime-лога. Native crash и ANR этим обработчиком не перехватываются.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
         ElevatedCard(modifier = Modifier.fillMaxWidth()) {
@@ -475,7 +738,7 @@ private fun DiagnosticsSettings(
                     if (diagnostics.logStreamActive) {
                         "Поток core активен только пока открыт этот экран."
                     } else {
-                        "Поток core не активен; сохранены только bounded строки текущего запуска."
+                        "Поток core не активен; в памяти сохранены только bounded строки текущего запуска."
                     },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -571,7 +834,7 @@ private fun DiagnosticsSettings(
         exportError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         OutlinedButton(onClick = onClearDnsCache) { Text("Очистить DNS-кэш и перезапустить core") }
         Text(
-            "Файл создаётся только этой кнопкой во временном cache. Runtime-лог на диск не пишется; файл удаляется при следующем запуске.",
+            "Файл создаётся только этой кнопкой во временном cache. Runtime-лог на диск не пишется; временный export удаляется при следующем запуске.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -664,8 +927,9 @@ private fun AboutSettings(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Text("Известные ограничения MVP", style = MaterialTheme.typography.titleMedium)
-                Text("• Android 8+; release APK — только arm64-v8a, интерфейс рассчитан на телефоны.")
+                Text("• Android 8+; release APK разделены на arm64-v8a, armeabi-v7a и x86_64, интерфейс рассчитан на телефоны.")
                 Text("• Always-on/Lockdown и shared UID не поддерживаются как гарантированный per-app режим.")
+                Text("• Rootless-защита не скрывает системный TRANSPORT_VPN, TUN и установленный APK.")
                 Text("• Managed DNS перехватывает TCP/UDP 53, но не встроенный DoH, DoT или mDNS; FakeIP выключен.")
                 Text("• Domain-only block не является firewall: для гарантии нужен IP/CIDR rule-set.")
                 Text("• Clash YAML и Hysteria v1 URI пока не импортируются; raw JSON остаётся ответственностью пользователя.")
@@ -790,6 +1054,19 @@ private fun DnsMode.description(): String = when (this) {
     DnsMode.FromJson -> "DNS-секция профиля запускается без managed-подмены."
 }
 
+private fun TunMtuMode.displayName(): String = when (this) {
+    TunMtuMode.CoreDefault -> "По профилю"
+    TunMtuMode.Normalize1500 -> "Нормализовать 1500"
+}
+
+private fun TunMtuMode.description(): String = when (this) {
+    TunMtuMode.CoreDefault ->
+        "Используется MTU профиля или Android-default ядра. Это самый совместимый режим."
+    TunMtuMode.Normalize1500 ->
+        "Runtime принудительно использует MTU 1500. Может уменьшить простой MTU-фингерпринт, " +
+            "но требует проверки QUIC/UDP и расхода CPU на реальном устройстве."
+}
+
 private fun VpnConnectionState.diagnosticLabel(): String = when (this) {
     VpnConnectionState.Stopped -> "VPN выключен"
     is VpnConnectionState.Starting -> "Подключение: $message"
@@ -797,5 +1074,28 @@ private fun VpnConnectionState.diagnosticLabel(): String = when (this) {
     is VpnConnectionState.Stopping -> "Отключение"
     is VpnConnectionState.Error -> "Ошибка VPN"
 }
+
+private fun DiagnosticAttemptOutcome.diagnosticLabel(totalDurationMillis: Long?): String = when (this) {
+    DiagnosticAttemptOutcome.Running -> "Подключение выполняется"
+    DiagnosticAttemptOutcome.Connected -> "Подключено за ${formatDiagnosticDuration(totalDurationMillis)}"
+    DiagnosticAttemptOutcome.Failed -> "Ошибка через ${formatDiagnosticDuration(totalDurationMillis)}"
+    DiagnosticAttemptOutcome.Cancelled -> "Попытка отменена через ${formatDiagnosticDuration(totalDurationMillis)}"
+}
+
+private fun DiagnosticStageStatus.symbol(): String = when (this) {
+    DiagnosticStageStatus.Running -> "…"
+    DiagnosticStageStatus.Success -> "✓"
+    DiagnosticStageStatus.Failed -> "×"
+    DiagnosticStageStatus.Cancelled -> "—"
+}
+
+private fun formatDiagnosticDuration(value: Long?): String = when {
+    value == null -> "не измерено"
+    value < 1_000 -> "$value мс"
+    else -> "%.2f с".format(value / 1_000.0)
+}
+
+private fun formatDiagnosticTimestamp(epochMillis: Long): String =
+    DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.MEDIUM).format(Date(epochMillis))
 
 private fun Boolean.yesNo(): String = if (this) "да" else "нет"

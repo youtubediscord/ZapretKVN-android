@@ -176,6 +176,10 @@ Lockdown Android способен блокировать трафик прило
 - Android 10+ (API 29+): `DnsResolver` с обычным объектом `Network`, `CancellationSignal` и `FLAG_EMPTY`;
 - Android 8–9: `Network.getAllByName()`.
 
+Этой границей владеет отдельный модуль `network-bootstrap`. Он публикует сеть только после получения и `NetworkCapabilities`, и `LinkProperties`, ждёт короткое стабильное окно перед bootstrap и один раз повторяет операцию только при доказанной смене identity либо bootstrap-значимых полей той же сети: validation/captive, Private DNS или списка DNS-серверов. Обычный DNS timeout/error при неизменной сети скрыто не повторяется. Coroutine cancellation всегда пробрасывается наружу.
+
+Ошибки bootstrap типизированы стабильными кодами: `NET-101/102` для отсутствующей/меняющейся сети и `DNS-101…106` для timeout, NXDOMAIN, REFUSED, пустого ответа, системной ошибки и прочего RCODE. На главной показываются код и понятное действие, а diagnostic JSON получает redacted `rcode`/`errno`/timeout без hostname сервера.
+
 Так приложение использует настройки сети Android и Private DNS на Android 9+. Нельзя получать hidden `getPrivateDnsBypassingCopy()` или отправлять собственный plaintext bootstrap-запрос: настройки Private DNS никогда не изменяются и не обходятся.
 
 В platform `LocalDNSTransport` применяем ту же underlying network. На API 29+ `Raw()` возвращает `true`, а `Exchange()` передаёт полный пакет через `DnsResolver.rawQuery()`. На API 26–28 `Raw()` возвращает `false`, и libbox вызывает `Lookup()` только для A/AAAA через `Network.getAllByName()`.

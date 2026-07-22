@@ -76,7 +76,10 @@ object UpdateJson {
         return objects.map(::release)
     }
 
-    fun metadata(raw: String): ReleaseMetadata {
+    fun metadata(
+        raw: String,
+        supportedAbis: List<String> = listOf("arm64-v8a"),
+    ): ReleaseMetadata {
         val root = try {
             JsonConfig.parse(raw) as? JsonObject
                 ?: throw UpdateException("release-metadata.json должен быть объектом.")
@@ -85,16 +88,11 @@ object UpdateJson {
         } catch (error: Exception) {
             throw UpdateException("release-metadata.json повреждён.", error)
         }
-        if (root.requiredInt("schema") != 1) {
-            throw UpdateException("Версия release metadata не поддерживается.")
+        val artifact = when (root.requiredInt("schema")) {
+            1 -> legacyArtifact(root, supportedAbis)
+            2 -> matrixArtifact(root, supportedAbis)
+            else -> throw UpdateException("Версия release metadata не поддерживается.")
         }
-        val apkFile = root.requiredString("apk_file")
-        if (!APK_FILE.matches(apkFile)) throw UpdateException("Некорректное имя APK в metadata.")
-        val sha256 = normalizedSha256(root.requiredString("apk_sha256"))
-        val abi = (root["abi"] as? JsonArray)
-            ?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
-            ?.takeIf(List<String>::isNotEmpty)
-            ?: throw UpdateException("ABI отсутствует в release metadata.")
         return ReleaseMetadata(
             versionName = root.requiredString("version_name"),
             versionCode = root.requiredLong("version_code").also {
@@ -105,13 +103,56 @@ object UpdateJson {
             coreCommit = root.requiredString("core_commit").also {
                 if (!COMMIT.matches(it)) throw UpdateException("Некорректный commit ядра в metadata.")
             },
-            abi = abi,
-            apkFile = apkFile,
-            apkSha256 = sha256,
-            apkSize = root.requiredLong("apk_size").also {
-                if (it <= 0 || it > MAX_APK_BYTES) throw UpdateException("Некорректный размер APK.")
-            },
+            abi = listOf(artifact.abi),
+            apkFile = artifact.apkFile,
+            apkSha256 = artifact.apkSha256,
+            apkSize = artifact.apkSize,
         )
+    }
+
+    private fun legacyArtifact(root: JsonObject, supportedAbis: List<String>): Artifact {
+        val abi = (root["abi"] as? JsonArray)
+            ?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
+            ?.singleOrNull()
+            ?.takeIf(KNOWN_ABIS::contains)
+            ?: throw UpdateException("ABI отсутствует в release metadata.")
+        if (abi !in supportedAbis) {
+            throw UpdateException("Для архитектуры этого устройства APK не опубликован.")
+        }
+        return artifact(
+            abi = abi,
+            apkFile = root.requiredString("apk_file"),
+            apkSha256 = root.requiredString("apk_sha256"),
+            apkSize = root.requiredLong("apk_size"),
+        )
+    }
+
+    private fun matrixArtifact(root: JsonObject, supportedAbis: List<String>): Artifact {
+        val artifacts = (root["artifacts"] as? JsonArray)
+            ?.map { value ->
+                val item = value as? JsonObject
+                    ?: throw UpdateException("Некорректный APK в release metadata.")
+                artifact(
+                    abi = item.requiredString("abi"),
+                    apkFile = item.requiredString("apk_file"),
+                    apkSha256 = item.requiredString("apk_sha256"),
+                    apkSize = item.requiredLong("apk_size"),
+                )
+            }
+            ?: throw UpdateException("Список APK отсутствует в release metadata.")
+        if (artifacts.map(Artifact::abi).toSet() != KNOWN_ABIS || artifacts.size != KNOWN_ABIS.size) {
+            throw UpdateException("Release содержит неполный или повторяющийся набор ABI.")
+        }
+        return supportedAbis.firstNotNullOfOrNull { supported ->
+            artifacts.singleOrNull { it.abi == supported }
+        } ?: throw UpdateException("Для архитектуры этого устройства APK не опубликован.")
+    }
+
+    private fun artifact(abi: String, apkFile: String, apkSha256: String, apkSize: Long): Artifact {
+        if (abi !in KNOWN_ABIS) throw UpdateException("Release содержит неподдерживаемый ABI.")
+        if (!APK_FILE.matches(apkFile)) throw UpdateException("Некорректное имя APK в metadata.")
+        if (apkSize <= 0 || apkSize > MAX_APK_BYTES) throw UpdateException("Некорректный размер APK.")
+        return Artifact(abi, apkFile, normalizedSha256(apkSha256), apkSize)
     }
 
     fun checksum(raw: String, expectedFile: String): String {
@@ -170,6 +211,13 @@ object UpdateJson {
             ?: throw UpdateException("Поле $name отсутствует в release metadata.")
 
     const val MAX_APK_BYTES = 512L * 1024 * 1024
+    private data class Artifact(
+        val abi: String,
+        val apkFile: String,
+        val apkSha256: String,
+        val apkSize: Long,
+    )
+    private val KNOWN_ABIS = setOf("arm64-v8a", "armeabi-v7a", "x86_64")
     private val APK_FILE = Regex("[A-Za-z0-9._-]+\\.apk")
     private val COMMIT = Regex("[0-9a-f]{40}")
     private val SHA256 = Regex("[0-9a-f]{64}")

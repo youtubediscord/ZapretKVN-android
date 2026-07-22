@@ -20,7 +20,7 @@ class VpnAppScopePreflightTest {
     }
 
     @Test
-    fun `missing selected package is rejected before builder`() {
+    fun `only missing selected package is rejected because no app remains`() {
         val added = mutableListOf<String>()
         val result = preflight(available = setOf(OWN_PACKAGE)).apply(
             userAllowlist = setOf("com.example.removed"),
@@ -32,6 +32,27 @@ class VpnAppScopePreflightTest {
             result,
         )
         assertTrue(added.isEmpty())
+    }
+
+    @Test
+    fun `missing package is skipped when another selected app remains`() {
+        val added = mutableListOf<String>()
+        val result = preflight(
+            available = setOf("com.example.installed", OWN_PACKAGE),
+        ).apply(
+            userAllowlist = setOf("com.example.removed", "com.example.installed"),
+            sink = added::add,
+        )
+
+        assertEquals(
+            VpnAppScopeResult.Ready(
+                mode = AppScopeMode.Include,
+                effectivePackages = listOf("com.example.installed", OWN_PACKAGE),
+                skippedPackages = listOf("com.example.removed"),
+            ),
+            result,
+        )
+        assertEquals(listOf("com.example.installed", OWN_PACKAGE), added)
     }
 
     @Test
@@ -102,12 +123,75 @@ class VpnAppScopePreflightTest {
         assertTrue("com.instagram.android" in packages)
         assertTrue("com.google.android.youtube" in packages)
         assertTrue("org.telegram.messenger" in packages)
+        assertTrue("org.telegram.messenger.beta" in packages)
+        assertTrue("org.telegram.messenger.web" in packages)
+        assertTrue("org.zastogram.messenger" in packages)
+        assertTrue("tw.nekomimi.nekogram" in packages)
+        assertTrue("com.radolyn.ayugram" in packages)
+        assertTrue("org.forkgram.messenger" in packages)
         assertTrue("com.whatsapp" in packages)
         assertTrue("com.discord" in packages)
         assertTrue("org.thoughtcrime.securesms" in packages)
         assertTrue("com.android.chrome" in packages)
+        assertTrue("org.chromium.chrome" in packages)
+        assertTrue("org.chromium.chrome.dev" in packages)
         assertTrue("org.mozilla.firefox" in packages)
         assertFalse(packages.any { it.contains("tiktok", ignoreCase = true) })
+    }
+
+    @Test
+    fun `any installed browser is suggested without a hardcoded package`() {
+        assertEquals(
+            "Браузер",
+            suggestedAppLabel(
+                packageName = "com.example.browser",
+                browserPackages = setOf("com.example.browser"),
+            ),
+        )
+        assertEquals(
+            null,
+            suggestedAppLabel(
+                packageName = "com.example.notes",
+                browserPackages = setOf("com.example.browser"),
+            ),
+        )
+    }
+
+    @Test
+    fun `any tg scheme handler is suggested without a hardcoded package`() {
+        assertEquals(
+            "Telegram-клиент",
+            suggestedAppLabel(
+                packageName = "com.example.telegramfork",
+                browserPackages = emptySet(),
+                telegramPackages = setOf("com.example.telegramfork"),
+            ),
+        )
+        assertEquals(
+            null,
+            suggestedAppLabel(
+                packageName = "com.example.notes",
+                browserPackages = emptySet(),
+                telegramPackages = setOf("com.example.telegramfork"),
+            ),
+        )
+    }
+
+    @Test
+    fun `application picker prompt requires zero selected applications`() {
+        assertFalse(AppsUiState(initialized = false).needsAppSelection)
+        assertTrue(
+            AppsUiState(
+                initialized = true,
+                allowedPackages = emptySet(),
+            ).needsAppSelection,
+        )
+        assertFalse(
+            AppsUiState(
+                initialized = true,
+                allowedPackages = setOf("com.example.browser"),
+            ).needsAppSelection,
+        )
     }
 
     private fun preflight(available: Set<String>) = VpnAppScopePreflight(

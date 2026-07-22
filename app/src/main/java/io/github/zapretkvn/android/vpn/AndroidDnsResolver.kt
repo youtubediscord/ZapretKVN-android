@@ -7,24 +7,23 @@ import android.os.CancellationSignal
 import android.annotation.TargetApi
 import android.system.OsConstants
 import android.system.ErrnoException
+import io.github.zapretkvn.networkbootstrap.AndroidBootstrapDnsResolver
+import io.github.zapretkvn.networkbootstrap.BootstrapFailureCode
+import io.github.zapretkvn.networkbootstrap.BootstrapFailureException
 import io.nekohasekai.libbox.ExchangeContext
 import io.nekohasekai.libbox.Func
 import io.nekohasekai.libbox.LocalDNSTransport
 import java.net.Inet4Address
 import java.net.Inet6Address
 import java.net.InetAddress
-import java.net.UnknownHostException
-import java.util.concurrent.Executor
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.suspendCancellableCoroutine
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.asExecutor
-import kotlin.coroutines.resume
-import kotlin.coroutines.resumeWithException
 
 class BootstrapResolver {
+    private val delegate = AndroidBootstrapDnsResolver()
+
     suspend fun resolve(
         network: Network,
         hostname: String,
@@ -32,46 +31,12 @@ class BootstrapResolver {
     ): List<InetAddress> {
         require(hostname.isNotBlank()) { "Пустое имя сервера." }
         if (VpnTestHooks.consumeBootstrapResolutionFailure()) {
-            throw UnknownHostException("Тестовая недоступность системного DNS: $hostname")
+            throw BootstrapFailureException(
+                BootstrapFailureCode.DnsSystem,
+                technicalDetail = "fault_injection",
+            )
         }
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            resolveModern(network, hostname, noCacheLookup)
-        } else {
-            withContext(Dispatchers.IO) { network.getAllByName(hostname).distinctBy(InetAddress::getHostAddress) }
-        }.ifEmpty { throw UnknownHostException(hostname) }
-    }
-
-    @TargetApi(Build.VERSION_CODES.Q)
-    private suspend fun resolveModern(
-        network: Network,
-        hostname: String,
-        noCacheLookup: Boolean,
-    ): List<InetAddress> = suspendCancellableCoroutine { continuation ->
-        val cancellation = CancellationSignal()
-        val flags = if (noCacheLookup) DnsResolver.FLAG_NO_CACHE_LOOKUP else DnsResolver.FLAG_EMPTY
-        DnsResolver.getInstance().query(
-            network,
-            hostname,
-            flags,
-            DIRECT_EXECUTOR,
-            cancellation,
-            object : DnsResolver.Callback<List<InetAddress>> {
-                override fun onAnswer(answer: List<InetAddress>, rcode: Int) {
-                    if (!continuation.isActive) return
-                    if (rcode == 0 && answer.isNotEmpty()) continuation.resume(answer.distinctBy(InetAddress::getHostAddress))
-                    else continuation.resumeWithException(UnknownHostException("$hostname (DNS rcode $rcode)"))
-                }
-
-                override fun onError(error: DnsResolver.DnsException) {
-                    if (continuation.isActive) continuation.resumeWithException(error)
-                }
-            },
-        )
-        continuation.invokeOnCancellation { cancellation.cancel() }
-    }
-
-    private companion object {
-        val DIRECT_EXECUTOR = Executor(Runnable::run)
+        return delegate.resolve(network, hostname, noCacheLookup)
     }
 }
 

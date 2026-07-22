@@ -1,0 +1,22 @@
+import com.android.build.api.dsl.LibraryExtension
+
+apply(plugin = "com.android.library")
+
+extensions.configure<LibraryExtension> {
+    namespace = "io.github.zapretkvn.networkbootstrap"
+    compileSdk = 36
+
+    defaultConfig {
+        minSdk = 26
+    }
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+    add("implementation", "org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+    add("testImplementation", "junit:junit:4.13.2")
+}

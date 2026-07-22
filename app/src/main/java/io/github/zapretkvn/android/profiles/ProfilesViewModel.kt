@@ -19,6 +19,10 @@ import io.github.zapretkvn.android.importer.ImportedConfigActivityScanner
 import io.github.zapretkvn.android.diagnostics.SecretRedactor
 import io.github.zapretkvn.android.importer.SubscriptionFetcher
 import io.github.zapretkvn.android.importer.SubscriptionSourceStore
+import io.github.zapretkvn.android.hardening.TunMtuMode
+import io.github.zapretkvn.android.routing.RoutingConfigEditor
+import io.github.zapretkvn.android.routing.RoutingPreset
+import io.github.zapretkvn.android.routing.RuleSetAssetManager
 import io.github.zapretkvn.android.ui.ThemeMode
 import io.github.zapretkvn.android.ui.UiSettings
 import io.github.zapretkvn.android.ui.UiSettingsStore
@@ -108,6 +112,7 @@ class ProfilesViewModel(
     private val subscriptionSourceStore: SubscriptionSourceStore,
     private val vpnController: VpnController,
     private val bootstrapCache: BootstrapCache,
+    private val ruleSetAssets: RuleSetAssetManager,
 ) : ViewModel() {
     private val mutableState = MutableStateFlow(ProfilesUiState())
     val state: StateFlow<ProfilesUiState> = mutableState.asStateFlow()
@@ -136,7 +141,17 @@ class ProfilesViewModel(
 
     fun importDocument(uri: Uri) = operation {
         val raw = withContext(Dispatchers.IO) { importReader.readDocument(uri) }
-        preview(raw, ProfileSource.File, "Профиль из файла", "Системный файл")
+        val displayName = withContext(Dispatchers.IO) { importReader.documentDisplayName(uri) }
+        val suggestedName = displayName
+            ?.substringBeforeLast('.', displayName)
+            ?.trim()
+            ?.takeIf(String::isNotEmpty)
+            ?: "Профиль из файла"
+        val sourceDescription = displayName
+            ?.let(SecretRedactor::redactInline)
+            ?.let { "Системный файл: $it" }
+            ?: "Системный файл"
+        preview(raw, ProfileSource.File, suggestedName, sourceDescription)
     }
 
     fun importClipboard() = operation {
@@ -406,6 +421,21 @@ class ProfilesViewModel(
         settingsStore.setUpdateChannel(channel)
     }
 
+    fun setVpnHidingBlockLocalEndpoints(enabled: Boolean) = operation(markBusy = false) {
+        settingsStore.setVpnHidingBlockLocalEndpoints(enabled)
+        vpnController.restartIfConnected("Смена защиты от localhost-чекеров")
+    }
+
+    fun setVpnHidingNeutralSessionName(enabled: Boolean) = operation(markBusy = false) {
+        settingsStore.setVpnHidingNeutralSessionName(enabled)
+        vpnController.restartIfConnected("Смена имени VPN-сессии")
+    }
+
+    fun setVpnHidingTunMtuMode(mode: TunMtuMode) = operation(markBusy = false) {
+        settingsStore.setVpnHidingTunMtuMode(mode)
+        vpnController.restartIfConnected("Смена MTU для скрытия VPN")
+    }
+
     fun consumeMessage() {
         mutableState.update { it.copy(message = null) }
     }
@@ -420,7 +450,20 @@ class ProfilesViewModel(
         val candidate = withContext(Dispatchers.Default) {
             ImportParser.parse(raw, source, suggestedName)
         }
-        val json = candidate.toJson()
+        val baseJson = candidate.toJson()
+        val json = if (candidate is ImportCandidate.Managed) {
+            val installed = withContext(Dispatchers.IO) { ruleSetAssets.ensureInstalled() }
+            withContext(Dispatchers.Default) {
+                RoutingConfigEditor.apply(
+                    baseJson,
+                    RoutingPreset.RussiaDirect,
+                    emptyList(),
+                    installed,
+                ).json
+            }
+        } else {
+            baseJson
+        }
         requireValid(json)
         val appendTargets = if (candidate is ImportCandidate.Managed && candidate.servers.size == 1) {
             buildList {
@@ -458,6 +501,7 @@ class ProfilesViewModel(
     private fun ImportCandidate.toJson(): String = when (this) {
         is ImportCandidate.RawJson -> json
         is ImportCandidate.Managed -> buildJson()
+        is ImportCandidate.WireGuard -> json
     }
 
     private fun ImportCandidate.serverCount(): Int = when (this) {
@@ -465,6 +509,7 @@ class ProfilesViewModel(
             ConfigAnalyzer.serverOutboundTags(json).size
         }.getOrDefault(0)
         is ImportCandidate.Managed -> servers.size
+        is ImportCandidate.WireGuard -> 1
     }
 
     private fun ImportCandidate.serverLabels(): List<String> = when (this) {
@@ -472,6 +517,9 @@ class ProfilesViewModel(
             ConfigAnalyzer.serverOutboundTags(json)
         }.getOrDefault(emptyList())
         is ImportCandidate.Managed -> servers.map(ManagedServer::displayName)
+        is ImportCandidate.WireGuard -> listOfNotNull(
+            endpointLabel?.let { "$protocolName · $it" } ?: protocolName,
+        )
     }.take(8).map(SecretRedactor::redactInline)
 
     private suspend fun requireValid(rawJson: String) {
@@ -539,6 +587,7 @@ class ProfilesViewModel(
         private val subscriptionSourceStore: SubscriptionSourceStore,
         private val vpnController: VpnController,
         private val bootstrapCache: BootstrapCache,
+        private val ruleSetAssets: RuleSetAssetManager,
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
@@ -552,6 +601,7 @@ class ProfilesViewModel(
                 subscriptionSourceStore,
                 vpnController,
                 bootstrapCache,
+                ruleSetAssets,
             ) as T
         }
     }

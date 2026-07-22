@@ -18,6 +18,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.zapretkvn.android.MainActivity
 import io.github.zapretkvn.android.ZapretApplication
 import io.github.zapretkvn.android.config.DnsMode
+import io.github.zapretkvn.android.hardening.TunMtuMode
 import io.github.zapretkvn.android.ui.UpdateChannel
 import io.github.zapretkvn.android.vpn.VpnConnectionState
 import kotlinx.coroutines.flow.first
@@ -44,6 +45,10 @@ class ProfileUiInstrumentedTest {
         container.uiSettingsStore.setActiveProfile(null)
         container.uiSettingsStore.setDnsMode(DnsMode.FromJson)
         container.uiSettingsStore.setUpdateChannel(UpdateChannel.Stable)
+        container.uiSettingsStore.setVpnHidingBlockLocalEndpoints(true)
+        container.uiSettingsStore.setVpnHidingNeutralSessionName(false)
+        container.uiSettingsStore.setVpnHidingTunMtuMode(TunMtuMode.CoreDefault)
+        container.appSelectionStore.replaceAllowlist(setOf("com.android.settings"))
     }
 
     @After
@@ -53,6 +58,9 @@ class ProfileUiInstrumentedTest {
         container.uiSettingsStore.setActiveProfile(null)
         container.uiSettingsStore.setDnsMode(DnsMode.FromJson)
         container.uiSettingsStore.setUpdateChannel(UpdateChannel.Stable)
+        container.uiSettingsStore.setVpnHidingBlockLocalEndpoints(true)
+        container.uiSettingsStore.setVpnHidingNeutralSessionName(false)
+        container.uiSettingsStore.setVpnHidingTunMtuMode(TunMtuMode.CoreDefault)
     }
 
     @Test
@@ -74,7 +82,7 @@ class ProfileUiInstrumentedTest {
         composeRule.waitUntil(timeoutMillis = UI_TIMEOUT_MILLIS) {
             container.profileStore.profiles.value.isNotEmpty()
         }
-        composeRule.onNodeWithText("Позже").performClick()
+        composeRule.onNodeWithText("Профиль готов").assertDoesNotExist()
         composeRule.onNodeWithText("Профиль из буфера").assertExists()
         composeRule.onNodeWithText("Буфер обмена").assertExists()
         composeRule.onNodeWithText("Обновлено:", substring = true).assertExists()
@@ -131,6 +139,21 @@ class ProfileUiInstrumentedTest {
                 container.uiSettingsStore.settings.first().updateChannel == UpdateChannel.Beta
             }
         }
+
+        composeRule.onNodeWithTag("settings-list").performScrollToNode(hasText("Скрытие VPN"))
+        composeRule.onNodeWithText("Скрытие VPN").performClick()
+        composeRule.onNodeWithText("Возможности rootless-режима").assertExists()
+        composeRule.onNodeWithTag("vpn-hiding-session-name").performScrollTo().performClick()
+        composeRule.onNodeWithTag("vpn-hiding-mtu-Normalize1500").performScrollTo().performClick()
+        composeRule.waitUntil(UI_TIMEOUT_MILLIS) {
+            runBlocking {
+                container.uiSettingsStore.settings.first().vpnHiding.let { options ->
+                    options.blockLocalEndpoints &&
+                        options.neutralSessionName &&
+                        options.tunMtuMode == TunMtuMode.Normalize1500
+                }
+            }
+        }
     }
 
     @Test
@@ -154,7 +177,7 @@ class ProfileUiInstrumentedTest {
         }
         composeRule.onNodeWithText("Диагностика").performClick()
         composeRule.onNodeWithText("Текущее состояние").assertExists()
-        composeRule.onNodeWithText("DNS через VPN").assertExists()
+        composeRule.onNodeWithText("DNS-200 · DNS через VPN").assertExists()
         composeRule.onNodeWithText("DNS через VPN заблокирован token=•••").assertExists()
         composeRule.onNodeWithText("visible-secret", substring = true).assertDoesNotExist()
         composeRule.waitUntil(UI_TIMEOUT_MILLIS) {

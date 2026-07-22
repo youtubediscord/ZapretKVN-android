@@ -29,10 +29,14 @@ class DiagnosticExportInstrumentedTest {
         val exporter = container.diagnosticExporter
         val directory = File(context.cacheDir, DiagnosticExporter.DIRECTORY_NAME)
         exporter.cleanupStaleFiles()
+        container.appCrashStore.clear()
         assertFalse("No report may exist before the explicit action", directory.exists())
 
         val token = container.vpnController.nextGeneration()
         try {
+            container.vpnController.beginConnectionDiagnostic(token, "instrumented_test")
+            container.vpnController.startConnectionDiagnosticStage(token, "profile", "Профиль")
+            container.vpnController.startConnectionDiagnosticStage(token, "dns_probe", "DNS-проверка")
             container.vpnController.publish(token, VpnConnectionState.Starting("hidden-profile", "Тест"))
             container.vpnController.publishDiagnosticNetwork(
                 token,
@@ -56,21 +60,44 @@ class DiagnosticExportInstrumentedTest {
             container.vpnController.publishCoreDiagnosticLog(
                 token,
                 3,
-                "token=super-secret 123e4567-e89b-12d3-a456-426614174000 com.example.hidden 203.0.113.7",
+                "\u001B[31mtoken=super-secret 123e4567-e89b-12d3-a456-426614174000 " +
+                    "com.example.hidden 203.0.113.7\u001B[0m",
             )
+            container.vpnController.publish(
+                token,
+                VpnConnectionState.Connected(
+                    profileId = "hidden-profile",
+                    profileName = "Hidden profile",
+                    connectedAtEpochMillis = System.currentTimeMillis(),
+                ),
+            )
+            container.appCrashStore.record(
+                threadName = "test-worker",
+                throwable = IllegalStateException("token=super-secret"),
+            )
+            val savedCrash = checkNotNull(container.appCrashStore.read())
+            assertEquals("IllegalStateException", savedCrash.exceptionType)
+            assertFalse(savedCrash.message.orEmpty().contains("super-secret"))
+            assertTrue(savedCrash.stack.size <= 16)
             val inMemoryLogs = container.vpnController.diagnostics.value.logs
                 .joinToString("\n") { it.message }
             assertFalse("super-secret" in inMemoryLogs)
             assertFalse("123e4567-e89b-12d3-a456-426614174000" in inMemoryLogs)
+            assertFalse("\u001B" in inMemoryLogs)
 
             val report = exporter.createReport()
             JsonConfig.parse(report)
-            assertTrue("\"report_version\": 1" in report)
+            assertTrue("\"report_version\": 2" in report)
             assertTrue(BuildConfig.CORE_COMMIT in report)
             assertTrue("\"private_dns_mode\"" in report)
             assertTrue("\"vpn_system_policy\"" in report)
             assertTrue("\"supported_by_app\": false" in report)
             assertTrue("\"effective_overlay\"" in report)
+            assertTrue("\"connection_attempt\"" in report)
+            assertTrue("\"total_duration_ms\"" in report)
+            assertTrue("\"dns_probe\"" in report)
+            assertTrue("\"previous_crash\"" in report)
+            assertTrue("\"IllegalStateException\"" in report)
             assertFalse("hidden-profile" in report)
             assertFalse("super-secret" in report)
             assertFalse("123e4567-e89b-12d3-a456-426614174000" in report)
@@ -100,6 +127,7 @@ class DiagnosticExportInstrumentedTest {
             assertFalse(checkNotNull(provider).exported)
         } finally {
             exporter.cleanupStaleFiles()
+            container.appCrashStore.clear()
             container.vpnController.publish(token, VpnConnectionState.Stopped)
         }
         assertFalse(directory.exists())

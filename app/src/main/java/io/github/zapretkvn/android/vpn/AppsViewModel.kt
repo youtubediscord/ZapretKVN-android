@@ -19,6 +19,9 @@ data class AppsUiState(
     val loading: Boolean = false,
     val error: String? = null,
 ) {
+    val needsAppSelection: Boolean
+        get() = initialized && allowedPackages.isEmpty()
+
     val missingPackages: Set<String>
         get() = if (catalogLoaded) {
             allowedPackages - apps.asSequence().map(InstalledApp::packageName).toSet()
@@ -35,6 +38,10 @@ class AppsViewModel(
     private val catalogLoaded = MutableStateFlow(false)
     private val loading = MutableStateFlow(false)
     private val error = MutableStateFlow<String?>(null)
+
+    init {
+        refresh()
+    }
 
     val state = combine(
         apps,

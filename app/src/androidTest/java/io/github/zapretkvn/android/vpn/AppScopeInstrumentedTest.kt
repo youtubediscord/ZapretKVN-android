@@ -41,6 +41,26 @@ class AppScopeInstrumentedTest {
     }
 
     @Test
+    fun defaultsAreAddedOnceButNeverReturnAfterUserClearsThem() = runBlocking {
+        container.appSelectionStore.replaceAllowlist(
+            packages = emptySet(),
+            initialized = false,
+        )
+
+        container.appSelectionStore.initializeIfNeeded(setOf(SETTINGS_PACKAGE))
+        val initialized = container.appSelectionStore.selection.first()
+        assertEquals(setOf(SETTINGS_PACKAGE), initialized.allowedPackages)
+        assertTrue(initialized.initialized)
+
+        container.appSelectionStore.setAllowed(SETTINGS_PACKAGE, allowed = false)
+        val cleared = container.appSelectionStore.selection.first()
+        assertTrue(cleared.allowedPackages.isEmpty())
+
+        container.appSelectionStore.initializeIfNeeded(setOf(SETTINGS_PACKAGE))
+        assertTrue(container.appSelectionStore.selection.first().allowedPackages.isEmpty())
+    }
+
+    @Test
     fun realPackageManagerPreflightAddsInternalHealthPackage() {
         val added = mutableListOf<String>()
 

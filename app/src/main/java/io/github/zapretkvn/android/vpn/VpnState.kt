@@ -9,7 +9,11 @@ sealed interface VpnConnectionState {
         val connectedAtEpochMillis: Long,
     ) : VpnConnectionState
     data class Stopping(val profileId: String?) : VpnConnectionState
-    data class Error(val message: String) : VpnConnectionState
+    data class Error(
+        val message: String,
+        val code: String = "",
+        val technicalDetail: String? = null,
+    ) : VpnConnectionState
 }
 
 data class RuntimeSelectorGroup(

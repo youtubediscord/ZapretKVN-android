@@ -42,6 +42,9 @@ class EffectiveOverlaySummaryTest {
         assertFalse("top-secret" in text)
         assertTrue(((summary["tun"] as JsonObject)["ipv4"] as JsonPrimitive).boolean)
         assertTrue(((summary["tun"] as JsonObject)["ipv6"] as JsonPrimitive).boolean)
+        val vpnHiding = summary["vpn_hiding"] as JsonObject
+        assertEquals("0", (vpnHiding["non_tun_inbound_count"] as JsonPrimitive).content)
+        assertFalse((vpnHiding["local_control_endpoint_present"] as JsonPrimitive).boolean)
         assertEquals(2, (summary["dns_servers"] as JsonArray).size)
         assertEquals("2", (summary["route_rule_count"] as JsonPrimitive).content)
         assertEquals("1", (summary["bootstrap_address_count"] as JsonPrimitive).content)

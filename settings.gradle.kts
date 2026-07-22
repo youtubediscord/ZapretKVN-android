@@ -16,3 +16,5 @@ dependencyResolutionManagement {
 
 rootProject.name = "ZapretKVN"
 include(":app")
+include(":network-bootstrap")
+include(":wireguard-import")

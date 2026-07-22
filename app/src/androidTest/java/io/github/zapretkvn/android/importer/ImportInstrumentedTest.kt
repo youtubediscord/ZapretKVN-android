@@ -27,6 +27,8 @@ import io.github.zapretkvn.android.profiles.ProfilesViewModel
 import io.github.zapretkvn.android.profiles.ProtocolOutboundBuilders
 import io.github.zapretkvn.android.profiles.TlsSettings
 import io.github.zapretkvn.android.profiles.TransportSettings
+import io.github.zapretkvn.android.routing.RoutingConfigEditor
+import io.github.zapretkvn.android.routing.RoutingPreset
 import io.github.zapretkvn.android.vpn.BootstrapCache
 import io.github.zapretkvn.android.vpn.VpnController
 import io.nekohasekai.libbox.Libbox
@@ -70,6 +72,36 @@ class ImportInstrumentedTest {
     }
 
     @Test
+    fun wireguardConfOpenedWithViewIntentReachesValidatedPreview() {
+        val testContext = InstrumentationRegistry.getInstrumentation().context
+        val resourceId = testContext.resources.getIdentifier(
+            "wireguard_profile",
+            "raw",
+            testContext.packageName,
+        )
+        val uri = Uri.parse("android.resource://${testContext.packageName}/$resourceId")
+        val intent = Intent(Intent.ACTION_VIEW, uri).apply {
+            setClass(context, MainActivity::class.java)
+            type = "application/x-wireguard-profile"
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        var viewModel: ProfilesViewModel? = null
+
+        ActivityScenario.launch<MainActivity>(intent).use { scenario ->
+            scenario.onActivity { activity ->
+                viewModel = ViewModelProvider(activity)[ProfilesViewModel::class.java]
+            }
+            val deadline = SystemClock.uptimeMillis() + 10_000
+            while (viewModel?.state?.value?.importPreview == null && SystemClock.uptimeMillis() < deadline) {
+                SystemClock.sleep(25)
+            }
+            val preview = checkNotNull(viewModel?.state?.value?.importPreview)
+            assertEquals(1, preview.serverCount)
+            assertTrue(preview.candidate is ImportCandidate.WireGuard)
+        }
+    }
+
+    @Test
     fun clipboardIsReadOnlyAfterExplicitReaderCall() {
         var imported = ""
         val canary = "clipboard-r8-${UUID.randomUUID()}"
@@ -109,6 +141,54 @@ class ImportInstrumentedTest {
 
         Libbox.checkConfig(ManagedProfileFactory.single(one))
         Libbox.checkConfig(ManagedProfileFactory.subscription(listOf(one, two)))
+    }
+
+    @Test
+    fun newManagedProfilePreviewDefaultsToRussiaDirect() = runBlocking {
+        val root = File(context.cacheDir, "default-routing-${System.nanoTime()}")
+        val testViewModelStore = ViewModelStore()
+        try {
+            val application = context.applicationContext as ZapretApplication
+            val profileStore = ProfileStore(File(root, "profiles"), LibboxConfigValidator())
+            profileStore.initialize()
+            val viewModel = ViewModelProvider(
+                object : ViewModelStoreOwner {
+                    override val viewModelStore: ViewModelStore = testViewModelStore
+                },
+                ProfilesViewModel.Factory(
+                    store = profileStore,
+                    settingsStore = application.container.uiSettingsStore,
+                    validator = LibboxConfigValidator(),
+                    importReader = AndroidImportReader(context),
+                    subscriptionFetcher = SubscriptionFetcher { error("Unexpected fetch") },
+                    subscriptionSourceStore = SubscriptionSourceStore(File(root, "subscriptions")),
+                    vpnController = VpnController(context),
+                    bootstrapCache = BootstrapCache(File(root, "network")),
+                    ruleSetAssets = application.container.ruleSetAssetManager,
+                ),
+            )[ProfilesViewModel::class.java]
+
+            viewModel.importQr(
+                "vless://11111111-1111-4111-8111-111111111111@one.example:443?security=tls#One",
+            )
+            val deadline = SystemClock.uptimeMillis() + 10_000
+            while (
+                viewModel.state.value.importPreview == null &&
+                viewModel.state.value.message == null &&
+                SystemClock.uptimeMillis() < deadline
+            ) {
+                SystemClock.sleep(25)
+            }
+
+            val json = checkNotNull(viewModel.state.value.importPreview).preparedJson
+            assertEquals(RoutingPreset.RussiaDirect, RoutingConfigEditor.inspect(json).preset)
+            assertTrue(json.contains("zapret-ru-domains"))
+            assertTrue(json.contains("zapret-ru-ip"))
+            Libbox.checkConfig(json)
+        } finally {
+            testViewModelStore.clear()
+            root.deleteRecursively()
+        }
     }
 
     @Test
@@ -175,6 +255,15 @@ class ImportInstrumentedTest {
     }
 
     @Test
+    fun wireguardAndAmneziaWg2ConfigsPassPinnedLibboxCheck() {
+        val wireGuard = ImportParser.parse(WIREGUARD_CONF, ProfileSource.File) as ImportCandidate.WireGuard
+        val amnezia = ImportParser.parse(AWG2_CONF, ProfileSource.File) as ImportCandidate.WireGuard
+
+        Libbox.checkConfig(wireGuard.json)
+        Libbox.checkConfig(amnezia.json)
+    }
+
+    @Test
     fun qrContractIsExplicitAndCameraPermissionIsDeclared() {
         val intent = ScanContract().createIntent(
             context,
@@ -231,6 +320,7 @@ class ImportInstrumentedTest {
                     subscriptionSourceStore = sourceStore,
                     vpnController = VpnController(context),
                     bootstrapCache = BootstrapCache(File(root, "network")),
+                    ruleSetAssets = application.container.ruleSetAssetManager,
                 ),
             )[ProfilesViewModel::class.java]
 
@@ -257,6 +347,45 @@ class ImportInstrumentedTest {
     )
 
     private companion object {
+        const val WIREGUARD_CONF = """
+            [Interface]
+            PrivateKey = TFlmmEUC7V7VtiDYLKsbP5rySTKLIZq1yn8lMqK83wo=
+            Address = 192.0.2.2/32
+            DNS = 192.0.2.53, 198.51.100.53
+            [Peer]
+            PublicKey = vBN7qyUTb5lJtWYJ8LhbPio1Z4RcyBPGnqFBGn6O6Qg=
+            Endpoint = 192.0.2.1:51820
+            AllowedIPs = 0.0.0.0/0
+            PersistentKeepalive = 25
+        """
+
+        const val AWG2_CONF = """
+            [Interface]
+            PrivateKey = TFlmmEUC7V7VtiDYLKsbP5rySTKLIZq1yn8lMqK83wo=
+            Address = 10.8.1.4/32
+            Jc = 4
+            Jmin = 10
+            Jmax = 50
+            S1 = 142
+            S2 = 41
+            S3 = 56
+            S4 = 11
+            H1 = 684141592-1751861769
+            H2 = 1957920865-2010016669
+            H3 = 2043550980-2107134838
+            H4 = 2127672251-2132651859
+            I1 = <r 2><b 0x858000010001000000000669636c6f756403636f6d0000010001>
+            I2 =
+            I3 =
+            I4 =
+            I5 =
+            [Peer]
+            PublicKey = vBN7qyUTb5lJtWYJ8LhbPio1Z4RcyBPGnqFBGn6O6Qg=
+            AllowedIPs = 0.0.0.0/0, ::/0
+            Endpoint = 192.0.2.1:51820
+            PersistentKeepalive = 25
+        """
+
         const val VALID_DIRECT =
             """{"outbounds":[{"type":"direct","tag":"direct"}],"route":{"final":"direct"}}"""
     }

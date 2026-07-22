@@ -32,6 +32,7 @@ internal class AndroidPlatformAdapter(
     private val expectedPackages: List<String>,
     private val scopePreflight: VpnAppScopePreflight,
     private val networkMonitor: DefaultNetworkMonitor,
+    private val sessionName: String,
 ) : PlatformInterface, AutoCloseable {
     private val connectivity = service.getSystemService(ConnectivityManager::class.java)
     private val interfaceListeners = mutableMapOf<InterfaceUpdateListener, AutoCloseable>()
@@ -95,7 +96,7 @@ internal class AndroidPlatformAdapter(
             "MTU TUN должен быть в диапазоне $MIN_MTU..$MAX_MTU."
         }
         val builder = service.Builder()
-            .setSession("Zapret KVN")
+            .setSession(sessionName)
             .setMtu(options.mtu)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) builder.setMetered(false)
 
@@ -125,7 +126,7 @@ internal class AndroidPlatformAdapter(
             }
             VpnAppScopeResult.EmptyAllowlist -> error("Пустая область приложений заблокирована.")
             is VpnAppScopeResult.MissingApplications -> error(
-                "Выбранные приложения недоступны: ${result.packageNames.joinToString()}.",
+                "Не осталось доступных выбранных приложений.",
             )
             is VpnAppScopeResult.BuilderFailure -> error(
                 "Android отклонил приложение ${result.packageName}: ${result.reason}",

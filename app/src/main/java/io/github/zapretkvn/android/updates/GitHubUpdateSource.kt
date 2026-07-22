@@ -1,5 +1,6 @@
 package io.github.zapretkvn.android.updates
 
+import android.os.Build
 import io.github.zapretkvn.android.ui.UpdateChannel
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -129,6 +130,7 @@ class GitHubUpdateSource(
     repository: String,
     private val applicationId: String,
     private val http: UpdateHttpClient = GitHubHttpsClient(),
+    private val supportedAbis: List<String> = Build.SUPPORTED_ABIS.toList(),
 ) : UpdateReleaseSource {
     private val repository = repository.also {
         if (!REPOSITORY.matches(it)) throw IllegalArgumentException("Invalid GitHub repository: $it")
@@ -148,17 +150,23 @@ class GitHubUpdateSource(
     }
 
     private fun candidate(release: GitHubRelease): UpdateCandidate {
-        val metadataAsset = release.assets.singleOrNull { it.name == METADATA_FILE }
-            ?: throw UpdateException("Release должен содержать ровно один $METADATA_FILE.")
-        val metadata = UpdateJson.metadata(http.readText(metadataAsset.downloadUrl, MAX_METADATA_BYTES))
+        val matrixAssets = release.assets.filter { it.name == MATRIX_METADATA_FILE }
+        val legacyAssets = release.assets.filter { it.name == LEGACY_METADATA_FILE }
+        val metadataAsset = when {
+            matrixAssets.size == 1 -> matrixAssets.single()
+            matrixAssets.size > 1 -> throw UpdateException("Release содержит повторяющийся $MATRIX_METADATA_FILE.")
+            legacyAssets.size == 1 -> legacyAssets.single()
+            else -> throw UpdateException("Release должен содержать ровно один файл metadata.")
+        }
+        val metadata = UpdateJson.metadata(
+            http.readText(metadataAsset.downloadUrl, MAX_METADATA_BYTES),
+            supportedAbis,
+        )
         if (metadata.applicationId != applicationId) {
             throw UpdateException("Release предназначен для другого Android package.")
         }
         if (metadata.versionName != release.tag.removePrefix("v")) {
             throw UpdateException("Версия metadata не совпадает с GitHub tag.")
-        }
-        if (metadata.abi != listOf("arm64-v8a")) {
-            throw UpdateException("Release содержит неподдерживаемый набор ABI.")
         }
         val apk = release.assets.singleOrNull { it.name == metadata.apkFile }
             ?: throw UpdateException("Release должен содержать ровно один заявленный APK.")
@@ -179,7 +187,8 @@ class GitHubUpdateSource(
     }
 
     private companion object {
-        const val METADATA_FILE = "release-metadata.json"
+        const val LEGACY_METADATA_FILE = "release-metadata.json"
+        const val MATRIX_METADATA_FILE = "release-metadata-v2.json"
         const val MAX_RELEASE_JSON_BYTES = 1024 * 1024
         const val MAX_METADATA_BYTES = 64 * 1024
         const val MAX_CHECKSUM_BYTES = 4 * 1024

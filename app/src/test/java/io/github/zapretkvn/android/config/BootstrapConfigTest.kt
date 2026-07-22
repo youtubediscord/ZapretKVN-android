@@ -42,4 +42,23 @@ class BootstrapConfigTest {
         assertFalse(literal!!.requiresDns)
         assertTrue(literal.tcpPreflightSupported)
     }
+
+    @Test
+    fun `native wireguard endpoint is selected from a full tunnel route`() {
+        val raw = """
+            {
+              "endpoints":[{"type":"wireguard","tag":"wg","address":["10.0.0.2/32"],"private_key":"redacted","peers":[{"address":"wg.example","port":51820,"public_key":"redacted","allowed_ips":["0.0.0.0/0"]}]}],
+              "outbounds":[{"type":"direct","tag":"direct"}],
+              "route":{"rules":[{"ip_cidr":["0.0.0.0/0"],"action":"route","outbound":"wg"}],"final":"direct"}
+            }
+        """.trimIndent()
+
+        assertEquals("wg", BootstrapConfig.selectedProxyTag(raw))
+        val target = BootstrapConfig.target(raw)!!
+        assertEquals("wireguard", target.outboundType)
+        assertEquals("wg.example", target.hostname)
+        assertEquals(51820, target.port)
+        assertFalse(target.tcpPreflightSupported)
+        assertFalse(target.staleAddressAllowed)
+    }
 }

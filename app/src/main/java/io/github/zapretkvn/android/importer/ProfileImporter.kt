@@ -3,6 +3,7 @@ package io.github.zapretkvn.android.importer
 import android.content.ClipboardManager
 import android.content.Context
 import android.net.Uri
+import android.provider.OpenableColumns
 import io.github.zapretkvn.android.config.JsonConfig
 import io.github.zapretkvn.android.profiles.ManagedProfileFactory
 import io.github.zapretkvn.android.profiles.ManagedServer
@@ -10,6 +11,8 @@ import io.github.zapretkvn.android.profiles.ProfileSource
 import io.github.zapretkvn.android.profiles.ProtocolOutboundBuilders
 import io.github.zapretkvn.android.profiles.TlsSettings
 import io.github.zapretkvn.android.profiles.TransportSettings
+import io.github.zapretkvn.wireguardimport.WireGuardConfigParser
+import io.github.zapretkvn.wireguardimport.WireGuardImportException
 import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.net.URI
@@ -42,6 +45,14 @@ sealed interface ImportCandidate {
             ManagedProfileFactory.subscription(servers)
         }
     }
+
+    data class WireGuard(
+        val json: String,
+        val protocolName: String,
+        val endpointLabel: String?,
+        override val suggestedName: String,
+        override val source: ProfileSource,
+    ) : ImportCandidate
 }
 
 class ImportException(message: String, cause: Throwable? = null) : Exception(message, cause)
@@ -62,6 +73,20 @@ object ImportParser {
             }
             return ImportCandidate.RawJson(
                 json = JsonConfig.format(text),
+                suggestedName = suggestedName,
+                source = source,
+            )
+        }
+        if (WireGuardConfigParser.looksLikeConfig(text)) {
+            val wireGuard = try {
+                WireGuardConfigParser.parse(text)
+            } catch (error: WireGuardImportException) {
+                throw ImportException(error.message ?: "Не удалось преобразовать WireGuard .conf.", error)
+            }
+            return ImportCandidate.WireGuard(
+                json = wireGuard.json,
+                protocolName = wireGuard.protocolName,
+                endpointLabel = wireGuard.endpointLabel,
                 suggestedName = suggestedName,
                 source = source,
             )
@@ -112,7 +137,7 @@ object ImportParser {
     }
 
     private const val SUPPORTED_MESSAGE =
-        "Поддерживаются JSON, VLESS, VMess, Trojan, Shadowsocks, Hysteria2 и TUIC."
+        "Поддерживаются JSON, WireGuard/AWG .conf, VLESS, VMess, Trojan, Shadowsocks, Hysteria2 и TUIC."
     private val SUPPORTED_SCHEMES = listOf(
         "vless://",
         "vmess://",
@@ -423,8 +448,29 @@ class AndroidImportReader(private val context: Context) {
         return text
     }
 
+    fun documentDisplayName(uri: Uri): String? = runCatching {
+        context.contentResolver.query(
+            uri,
+            arrayOf(OpenableColumns.DISPLAY_NAME),
+            null,
+            null,
+            null,
+        )?.use { cursor ->
+            if (!cursor.moveToFirst()) return@use null
+            cursor.getString(cursor.getColumnIndexOrThrow(OpenableColumns.DISPLAY_NAME))
+                ?.trim()
+                ?.takeIf(String::isNotEmpty)
+                ?.take(MAX_DISPLAY_NAME_LENGTH)
+        }
+    }.getOrNull() ?: uri.lastPathSegment
+        ?.substringAfterLast('/')
+        ?.trim()
+        ?.takeIf(String::isNotEmpty)
+        ?.take(MAX_DISPLAY_NAME_LENGTH)
+
     private companion object {
         const val MAX_IMPORT_BYTES = 4 * 1024 * 1024
+        const val MAX_DISPLAY_NAME_LENGTH = 160
     }
 }
 

@@ -9,6 +9,8 @@ import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import io.github.zapretkvn.android.config.DnsMode
+import io.github.zapretkvn.android.hardening.TunMtuMode
+import io.github.zapretkvn.android.hardening.VpnHidingOptions
 import java.io.IOException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
@@ -31,6 +33,7 @@ data class UiSettings(
     val rawEditorLineWrap: Boolean = false,
     val dnsMode: DnsMode = DnsMode.FromJson,
     val updateChannel: UpdateChannel = UpdateChannel.Stable,
+    val vpnHiding: VpnHidingOptions = VpnHidingOptions(),
 )
 
 private val Context.uiSettingsDataStore: DataStore<Preferences> by preferencesDataStore(
@@ -57,6 +60,13 @@ class UiSettingsStore(context: Context) {
                 updateChannel = preferences[UPDATE_CHANNEL]
                     ?.let { stored -> UpdateChannel.entries.firstOrNull { it.name == stored } }
                     ?: UpdateChannel.Stable,
+                vpnHiding = VpnHidingOptions(
+                    blockLocalEndpoints = preferences[VPN_HIDING_BLOCK_LOCAL_ENDPOINTS] ?: true,
+                    neutralSessionName = preferences[VPN_HIDING_NEUTRAL_SESSION_NAME] ?: false,
+                    tunMtuMode = preferences[VPN_HIDING_TUN_MTU_MODE]
+                        ?.let { stored -> TunMtuMode.entries.firstOrNull { it.name == stored } }
+                        ?: TunMtuMode.CoreDefault,
+                ),
             )
         }
 
@@ -83,11 +93,28 @@ class UiSettingsStore(context: Context) {
         dataStore.edit { it[UPDATE_CHANNEL] = channel.name }
     }
 
+    suspend fun setVpnHidingBlockLocalEndpoints(enabled: Boolean) {
+        dataStore.edit { it[VPN_HIDING_BLOCK_LOCAL_ENDPOINTS] = enabled }
+    }
+
+    suspend fun setVpnHidingNeutralSessionName(enabled: Boolean) {
+        dataStore.edit { it[VPN_HIDING_NEUTRAL_SESSION_NAME] = enabled }
+    }
+
+    suspend fun setVpnHidingTunMtuMode(mode: TunMtuMode) {
+        dataStore.edit { it[VPN_HIDING_TUN_MTU_MODE] = mode.name }
+    }
+
     private companion object {
         val THEME_MODE = stringPreferencesKey("theme_mode")
         val ACTIVE_PROFILE_ID = stringPreferencesKey("active_profile_id")
         val RAW_EDITOR_LINE_WRAP = booleanPreferencesKey("raw_editor_line_wrap")
         val DNS_MODE = stringPreferencesKey("dns_mode")
         val UPDATE_CHANNEL = stringPreferencesKey("update_channel")
+        val VPN_HIDING_BLOCK_LOCAL_ENDPOINTS =
+            booleanPreferencesKey("vpn_hiding_block_local_endpoints")
+        val VPN_HIDING_NEUTRAL_SESSION_NAME =
+            booleanPreferencesKey("vpn_hiding_neutral_session_name")
+        val VPN_HIDING_TUN_MTU_MODE = stringPreferencesKey("vpn_hiding_tun_mtu_mode")
     }
 }

@@ -48,7 +48,7 @@ jobs:
         shell: bash
         run: |
           source core.properties
-          yes | sdkmanager --licenses >/dev/null
+          sdkmanager --licenses >/dev/null < <(yes)
           sdkmanager \
             "platforms;android-$ANDROID_COMPILE_SDK" \
             "build-tools;$ANDROID_BUILD_TOOLS" \
@@ -102,6 +102,6 @@ jobs:
             core-build/output/native-debug-symbols.zip
             core-build/output/native-symbols-metadata.json
             core-build/output/native-symbols-SHA256SUMS
-            build/release-candidate/security-report.json
+            build/release-candidate/security-report-*.json
             build/gate8-performance/**
             emulator.log

@@ -1,73 +1,137 @@
-# Zapret KVN Android
-<img width="1916" height="821" alt="image" src="https://github.com/user-attachments/assets/b73f9815-b392-41e8-a94d-aaf316086715" />
+# Zapret KVN
 
-Нативный Material 3 клиент для `sing-box-extended` с per-app VPN, импортом ссылок/подписок и настоящим sing-box JSON как единственным источником сетевой конфигурации.
+<img width="1916" height="821" alt="Zapret KVN" src="https://github.com/user-attachments/assets/b73f9815-b392-41e8-a94d-aaf316086715" />
 
-Этапы 0–7 и автоматизируемая часть этапа 8 реализованы. Приложение принимает JSON, URL, QR, буфер и файлы, поддерживает основные URI/subscription форматы, per-app VPN, routing, session-dashboard и redacted диагностику. Локально проходят 85/85 JVM и полный набор 67/67 instrumented-тестов на API 36; API 26 прошёл прежнюю полную матрицу 66/66 и новый security-delta 3/3, API 29 — 66/66. API 29/36 дополнительно прошли 100 connect/stop и 50 Wi-Fi/cellular transitions. API 36 также прошёл 16 performance-сценариев × 5 повторов с raw System Trace/batterystats; defaults не изменены, поскольку AVD не заменяет физический energy gate. Физические DNS/OEM/NAT64/outbound/energy gates, production signing key и первый production GitHub Release ещё впереди. Канонические документы:
+### VPN, который пропускает только необходимое
 
-- [архитектура](ARCHITECTURE.md);
-- [план реализации](IMPLEMENTATION_PLAN.md);
-- [DNS ADR](DNS_ARCHITECTURE.md);
-- [Routing ADR](ROUTING_ARCHITECTURE.md);
-- [политика форматов импорта](IMPORT_FORMATS.md).
-- [подпись и восстановление ключа](SIGNING.md).
-- [протокол Gate 8](GATE8_RESULTS.md).
+Zapret KVN — быстрый и бережный Android-клиент для `sing-box-extended`. Это не ещё одна оболочка над VPN-ядром, а цельная архитектура, в которой приложения, маршруты, DNS и подключение работают как одна система.
 
-## Toolchain
+По умолчанию выбранные приложения используют режим «Россия напрямую»: российские домены и IP, а также LAN идут через прямую сеть Android, остальное — через VPN. Так VPN-сервер не тратит ресурсы на доступные без обхода сайты.
 
-- JDK 17 для воспроизводимой сборки libbox;
-- Android Gradle Plugin `9.2.1`;
-- Gradle `9.4.1`;
-- compile/target SDK `36`, min SDK `26`;
-- Compose BOM `2026.06.00`;
-- pinned `sing-box-extended` `v1.13.14-extended-2.5.2` commit `ff11f007ec798136a5de258f947a4f34011a37ea`.
-- release ABI: `arm64-v8a`; build AAR дополнительно содержит `x86_64` только для instrumented-тестов эмулятора и отсекается release `abiFilters`.
+> **Сейчас проект находится на стадии pre-release.** Целевой ориентир — подтверждённое подключение за 1–2 секунды на реальных устройствах. Это цель финального performance-gate, а не обещание для текущих тестовых сборок.
 
-## Сборка
+[Скачать тестовую сборку](https://github.com/youtubediscord/ZapretKVN-android/releases) · [Посмотреть архитектуру](ARCHITECTURE.md) · [Изучить маршрутизацию](ROUTING_ARCHITECTURE.md)
 
-Укажите путь к Android SDK в `local.properties` или `ANDROID_HOME`. Полный локальный аналог CI запускается одной командой:
+## Минимализм в чистом виде
 
-```bash
-scripts/ci-build.sh
-```
+- **Только нужные приложения.** Невыбранные приложения вообще не попадают в TUN: их не видят ни VPN-ядро, ни DNS приложения, ни VPN-сервер.
+- **Россия напрямую по умолчанию.** Российские домены и IP, а также LAN сразу идут напрямую. Они не занимают канал и ресурсы VPN-сервера и не получают зарубежный IP без необходимости.
+- **Только нужные сайты.** Для каждого направления можно выбрать действие: через VPN, напрямую или блокировать.
+- **Без лишних запросов.** Нет периодических health-check, бесконечного reconnect, фоновой синхронизации и одновременных запросов к основному и резервному DNS.
+- **Без тяжёлого фона.** Приложение не держит `WakeLock`, не запускает alarm/job/WorkManager, а статистику обновляет только пока открыт главный экран.
+- **Rootless hardening.** Localhost proxy/API закрываются до запуска ядра; защита не создаёт scanner, timer или отдельный процесс.
+- **Нативный интерфейс.** Компактный Material 3 на стандартных компонентах и анимациях, без тяжёлого dashboard.
 
-Команда собирает exact pinned CLI/AAR, проверяет 6 fixtures и packaged rule-set, запускает Go/Kotlin tests и lint, затем собирает debug/release APK и выполняет security-аудит уже собранного release. Вместе с APK создаются R8 mapping и exact native symbols, проверенные по всем allocated ELF-секциям production `libbox`. Debug APK появится в `app/build/outputs/apk/debug/`. Сборка приложения намеренно останавливается, если `app/libs/libbox.aar` отсутствует. Динамическая загрузка ядра приложением запрещена.
+## Трафик идёт кратчайшим путём
 
-GitHub Actions запускает тот же `scripts/ci-build.sh` при push, pull request или вручную и сохраняет APK, SHA-256, core version/revision, R8 mapping, native symbols и security report одним artifact.
+| Трафик | Что с ним происходит |
+|---|---|
+| Невыбранное приложение | Android сразу отправляет его напрямую; Zapret KVN его не обрабатывает |
+| Выбранный трафик с правилом `direct` | Проходит локальное правило, но не обращается к VPN-серверу |
+| Выбранный трафик с правилом `proxy` | Уходит через выбранный VPN-профиль |
+| Заблокированный трафик | Отклоняется локально |
 
-Release workflow запускается вручную для существующего tag `vMAJOR.MINOR.PATCH` или
-`vMAJOR.MINOR.PATCH-beta.N` после физического gate. Он требует approval и secrets среды
-`release`, сверяет закреплённый SHA-256 signing-сертификата, повторяет Android/no-background
-gates, подписывает arm64 APK и публикует APK, `.sha256`, `release-metadata.json` и notes.
-Подготовка постоянного ключа описана в [SIGNING.md](SIGNING.md).
+Так сервер обрабатывает только тот трафик, ради которого он действительно нужен. Можно направить через VPN отдельные приложения или сайты, оставить Россию напрямую, отправить через VPN только российские ресурсы либо собрать собственные правила.
 
-Полная Android-матрица запускается на одном подключённом устройстве командой
-`./gradlew :app:connectedDebugAndroidTest`. Контракт hard process death отдельно
-проверяет `scripts/verify-process-recreation.sh`; debug probe в release APK не попадает.
-Same-key upgrade/data persistence проверяет `scripts/verify-same-key-upgrade.sh`.
-Minified release clean-install/update, cold start, downgrade и несовместимую подпись проверяет
-`scripts/verify-release-device.sh` на одном подключённом arm64-v8a/x86_64 устройстве; скрипт
-использует одноразовый тестовый ключ и не заменяет финальную проверку production-подписи.
+## WireGuard и WARP — с настоящим роутингом
 
-Gradle Wrapper проверяет SHA-256 дистрибутива, Maven/plugin artifacts проверяются по `gradle/verification-metadata.xml`, а используемые GitHub Actions закреплены полными commit SHA.
+Zapret KVN импортирует WireGuard и AmneziaWG `.conf`, включая совместимые конфигурации WARP. WireGuard здесь не означает режим «всё устройство целиком через один сервер»: профиль становится полноценным outbound и участвует в тех же правилах `direct` / `proxy` / `reject`.
+
+Это позволяет, например, отправить через WARP только выбранные сайты, остальные открыть напрямую, а другой набор трафика направить через отдельный proxy-outbound в составе конфигурации. Из-за ограничений Android выбранные приложения используют один системный TUN, но решение о маршруте остаётся раздельным для каждого назначения.
+
+## Скрытие VPN без root
+
+В «Настройки → Скрытие VPN» находятся меры, которые реально доступны обычному
+Android-приложению: запрет дополнительных localhost inbounds, удаление внешних
+Clash/V2Ray control API, нейтральное имя VPN-сессии и экспериментальный MTU 1500.
+Постоянная защита включена по умолчанию, работает только при сборке runtime JSON и
+не добавляет фоновой нагрузки. Сохранённый профиль не переписывается.
+
+Android всё равно показывает системный `VpnService`, `TRANSPORT_VPN`, TUN-интерфейс
+и VPN indicator. Zapret KVN не называет rootless-режим полной невидимостью и не
+пытается подменять API других приложений. Точные границы и release-gate описаны в
+[VPN Hiding ADR](VPN_HIDING_ARCHITECTURE.md).
+
+## Быстрый и лёгкий — по архитектуре
+
+Внутри приложения один Android VPN service, один TUN и один экземпляр ядра. Здесь нет второго туннеля, дублирующих таблиц правил и постоянного опроса состояния. Конфигурация проверяется до запуска, а при ошибке соединение полностью закрывается вместо бесконечных повторов в фоне.
+
+Автоматизированные проверки уже подтвердили:
+
+- 85/85 JVM-тестов и 67/67 instrumented-тестов на Android API 36;
+- полные матрицы на API 26 и 29;
+- 100 циклов connect/stop и 50 переходов Wi-Fi ↔ cellular на API 29/36;
+- отсутствие собственного периодического сетевого трафика в idle-сценариях;
+- обход TUN невыбранным трафиком: в тесте 5 × 8 MiB дали 0 UID RX+TX приложения и медиану 0 TUN bytes.
+
+Физические проверки энергии, OEM-поведения, DNS/NAT64 и финальной скорости подключения ещё входят в release-gate. Подробные результаты и границы измерений опубликованы в [GATE8_RESULTS.md](GATE8_RESULTS.md).
+
+## Профиль добавляется так, как удобно
+
+Можно импортировать JSON, WireGuard/AWG `.conf`, VLESS, VMess, Trojan, Shadowsocks, Hysteria2 и TUIC из ссылки, подписки, QR-кода, буфера обмена или файла. Перед сохранением приложение показывает preview и проверяет конфигурацию встроенным ядром.
+
+Настоящий sing-box JSON остаётся единственным источником сетевой конфигурации: Zapret KVN не создаёт скрытую копию правил и не теряет незнакомые extended-поля.
 
 ## Тестовые сборки
 
-Ручные debug-сборки публикуются в [GitHub Releases](https://github.com/youtubediscord/ZapretKVN-android/releases)
-как pre-release. Они имеют package `io.github.zapretkvn.android.debug` и Android debug key,
-могут стоять рядом с будущим production APK и не считаются прохождением release gate.
-При ошибке откройте «Настройки → Диагностика → Создать и передать diagnostic JSON».
+Ручные debug-сборки публикуются в [GitHub Releases](https://github.com/youtubediscord/ZapretKVN-android/releases) как pre-release. Они используют package `io.github.zapretkvn.android.debug` и Android debug key, поэтому могут стоять рядом с будущей production-версией.
+
+При ошибке главная сразу показывает стабильный код вида `DNS-101` или `NET-102` и понятное описание. В «Настройки → Диагностика» видны этот же код, безопасная техническая причина, длительности этапов, bounded-логи и последний Kotlin/Java crash. Кнопка «Создать и передать diagnostic JSON» формирует redacted-отчёт без профиля и credentials.
 
 ## Известные ограничения MVP
 
-- Android 8+; release APK содержит только `arm64-v8a`, интерфейс рассчитан на телефоны.
+- Android 8+; release APK разделены на `arm64-v8a`, `armeabi-v7a` и `x86_64`, интерфейс рассчитан на телефоны.
 - Always-on/Lockdown и shared UID не поддерживаются как гарантированный per-app режим.
+- Rootless hardening не скрывает системный `TRANSPORT_VPN`, TUN и установленный APK от другого приложения.
 - Managed DNS перехватывает TCP/UDP 53, но не встроенный DoH, DoT или mDNS; FakeIP выключен.
 - Domain-only block не является firewall: для гарантии нужен IP/CIDR rule-set.
 - Clash YAML и Hysteria v1 URI пока не импортируются; raw JSON остаётся ответственностью пользователя.
 - Подписки, core и APK обновляются только вручную; silent install и фоновая синхронизация отсутствуют.
 - При неработающем proxy/DNS VPN закрывается без бесконечного retry и plaintext DNS fallback.
 
+## Документация
+
+- [Архитектура продукта](ARCHITECTURE.md)
+- [Маршрутизация](ROUTING_ARCHITECTURE.md)
+- [DNS и Android VPN](DNS_ARCHITECTURE.md)
+- [Скрытие VPN и rootless hardening](VPN_HIDING_ARCHITECTURE.md)
+- [Поддерживаемые форматы импорта](IMPORT_FORMATS.md)
+- [План реализации](IMPLEMENTATION_PLAN.md)
+- [Результаты Gate 8](GATE8_RESULTS.md)
+- [Подпись и восстановление ключа](SIGNING.md)
+
+<details>
+<summary><strong>Сборка для разработчиков</strong></summary>
+
+### Toolchain
+
+- JDK 17;
+- Android Gradle Plugin `9.2.1` и Gradle `9.4.1`;
+- compile/target SDK `36`, min SDK `26`;
+- Compose BOM `2026.06.00`;
+- закреплённый `sing-box-extended` `v1.13.14-extended-2.5.2`, commit `ff11f007ec798136a5de258f947a4f34011a37ea`;
+- отдельные APK для `arm64-v8a`, `armeabi-v7a` и `x86_64`, без чужих native-библиотек внутри.
+
+Укажите путь к Android SDK в `local.properties` или `ANDROID_HOME`, затем запустите локальный аналог CI:
+
+```bash
+scripts/ci-build.sh
+```
+
+Скрипт собирает закреплённые CLI/AAR, проверяет fixtures и rule-set, запускает Go/Kotlin tests и lint, собирает `x86_64` debug APK и три release APK, затем проверяет ABI, stripping, R8 mapping, native symbols и security-инварианты.
+
+Для debug APK другой архитектуры используйте, например:
+
+```bash
+./gradlew assembleDebug -PzapretAbi=arm64-v8a
+```
+
+Универсальный APK намеренно не создаётся. Сборка также останавливается, если `app/libs/libbox.aar` отсутствует: динамическая загрузка ядра приложением запрещена.
+
+Полная Android-матрица запускается командой `./gradlew :app:connectedDebugAndroidTest`. Дополнительные device/release-проверки описаны в [плане реализации](IMPLEMENTATION_PLAN.md) и [протоколе Gate 8](GATE8_RESULTS.md).
+
+</details>
+
 ## Лицензия
 
-Код Zapret KVN распространяется по GPL-3.0-or-later. Условия сторонних компонентов перечислены в [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+Zapret KVN распространяется по лицензии GPL-3.0-or-later. Условия сторонних компонентов перечислены в [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

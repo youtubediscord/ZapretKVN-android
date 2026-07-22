@@ -1,6 +1,7 @@
 package io.github.zapretkvn.android.config
 
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
@@ -32,9 +33,15 @@ object BootstrapConfig {
             ?.mapNotNull { it as? JsonObject }
             .orEmpty()
         val byTag = outbounds.mapNotNull { item -> item.string("tag")?.let { it to item } }.toMap()
+        val endpoints = (root["endpoints"] as? JsonArray)
+            ?.mapNotNull { it as? JsonObject }
+            .orEmpty()
+        val endpointsByTag = endpoints.mapNotNull { item -> item.string("tag")?.let { it to item } }.toMap()
         var tag = selectedProxyTag(root) ?: return null
         val visited = mutableSetOf<String>()
         while (visited.add(tag)) {
+            val endpoint = endpointsByTag[tag]
+            if (endpoint != null) return endpointTarget(tag, endpoint)
             val outbound = byTag[tag] ?: return null
             val type = outbound.string("type") ?: return null
             if (type == "selector" || type == "urltest") {
@@ -69,12 +76,54 @@ object BootstrapConfig {
         val outbounds = (root["outbounds"] as? JsonArray)
             ?.mapNotNull { it as? JsonObject }
             .orEmpty()
+        val endpoints = (root["endpoints"] as? JsonArray)
+            ?.mapNotNull { it as? JsonObject }
+            .orEmpty()
         if (outbounds.any { it.string("tag") == ConfigAnalyzer.MANAGED_SELECTOR_TAG }) {
             return ConfigAnalyzer.MANAGED_SELECTOR_TAG
         }
         val final = (root["route"] as? JsonObject)?.string("final") ?: return null
-        val finalType = outbounds.firstOrNull { it.string("tag") == final }?.string("type")
-        return final.takeUnless { finalType in NON_PROXY_TYPES }
+        val finalType = (outbounds + endpoints).firstOrNull { it.string("tag") == final }?.string("type")
+        if (finalType !in NON_PROXY_TYPES) return final
+
+        val endpointTags = endpoints.mapNotNull { it.string("tag") }.toSet()
+        val routedEndpointTags = (((root["route"] as? JsonObject)?.get("rules") as? JsonArray).orEmpty())
+            .mapNotNull { it as? JsonObject }
+            .filter { it.string("action") == "route" && it.string("outbound") in endpointTags }
+            .filter { rule ->
+                val prefixes = stringArray(rule["ip_cidr"])
+                "0.0.0.0/0" in prefixes || "::/0" in prefixes
+            }
+            .mapNotNull { it.string("outbound") }
+            .distinct()
+        return routedEndpointTags.singleOrNull()
+    }
+
+    private fun endpointTarget(tag: String, endpoint: JsonObject): ProxyBootstrapTarget? {
+        val type = endpoint.string("type") ?: return null
+        if (type != "wireguard") return null
+        val peer = (endpoint["peers"] as? JsonArray)
+            ?.mapNotNull { it as? JsonObject }
+            ?.firstOrNull { it.string("address")?.isNotBlank() == true }
+            ?: return null
+        val hostname = peer.string("address")?.trim()?.takeIf(String::isNotEmpty) ?: return null
+        val port = (peer["port"] as? JsonPrimitive)?.intOrNull ?: return null
+        if (port !in 1..65535) return null
+        return ProxyBootstrapTarget(
+            outboundTag = tag,
+            outboundType = type,
+            hostname = hostname,
+            port = port,
+            requiresDns = !looksNumeric(hostname),
+            tcpPreflightSupported = false,
+            staleAddressAllowed = false,
+        )
+    }
+
+    private fun stringArray(element: JsonElement?): List<String> = when (element) {
+        is JsonArray -> element.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
+        is JsonPrimitive -> listOfNotNull(element.contentOrNull)
+        else -> emptyList()
     }
 
     private fun JsonObject.boolean(key: String): Boolean? =

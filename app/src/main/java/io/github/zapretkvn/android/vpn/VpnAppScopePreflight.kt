@@ -19,6 +19,7 @@ sealed interface VpnAppScopeResult {
     data class Ready(
         val mode: AppScopeMode,
         val effectivePackages: List<String>,
+        val skippedPackages: List<String> = emptyList(),
     ) : VpnAppScopeResult {
         constructor(effectivePackages: List<String>) : this(AppScopeMode.Include, effectivePackages)
     }
@@ -74,14 +75,16 @@ class VpnAppScopePreflight(
         val userPackages = normalizePackageNames(selectedPackages, ownPackageName).toList()
         if (userPackages.isEmpty()) return VpnAppScopeResult.EmptyAllowlist
 
-        val effectivePackages = if (mode == AppScopeMode.Include) {
-            userPackages + ownPackageName
-        } else {
-            userPackages
+        val missing = userPackages.filterNot(packageAvailability::isInstalledAndEnabled)
+        val availableUserPackages = userPackages - missing.toSet()
+        if (availableUserPackages.isEmpty()) {
+            return VpnAppScopeResult.MissingApplications(missing)
         }
-        val requiredPackages = (userPackages + ownPackageName).distinct()
-        val missing = requiredPackages.filterNot(packageAvailability::isInstalledAndEnabled)
-        if (missing.isNotEmpty()) return VpnAppScopeResult.MissingApplications(missing)
+        val effectivePackages = if (mode == AppScopeMode.Include) {
+            availableUserPackages + ownPackageName
+        } else {
+            availableUserPackages
+        }
 
         effectivePackages.forEach { packageName ->
             try {
@@ -98,7 +101,7 @@ class VpnAppScopePreflight(
                 )
             }
         }
-        return VpnAppScopeResult.Ready(mode, effectivePackages)
+        return VpnAppScopeResult.Ready(mode, effectivePackages, missing)
     }
 }
 
