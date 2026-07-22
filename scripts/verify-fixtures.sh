@@ -10,8 +10,8 @@ if [[ ! -x "$SING_BOX_CLI" ]]; then
 fi
 
 mapfile -t FIXTURES < <(find "$PROJECT_ROOT/testdata" -type f -name '*.json' | sort)
-if [[ "${#FIXTURES[@]}" -ne 6 ]]; then
-    echo "Expected exactly 6 fixtures, found ${#FIXTURES[@]}" >&2
+if [[ "${#FIXTURES[@]}" -ne 7 ]]; then
+    echo "Expected exactly 7 fixtures, found ${#FIXTURES[@]}" >&2
     exit 1
 fi
 
@@ -33,4 +33,4 @@ for fixture in "${FIXTURES[@]}"; do
     echo "OK ${fixture#"$PROJECT_ROOT/"}"
 done
 
-echo "Accepted fixtures: ${#FIXTURES[@]}/6"
+echo "Accepted fixtures: ${#FIXTURES[@]}/7"

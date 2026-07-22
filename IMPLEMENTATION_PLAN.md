@@ -29,7 +29,7 @@
 - [x] Зафиксирована DNS-архитектура без FakeIP: Auto `профиль → Android → DoH`, а `fallback/parallel` используется только внутри защищённого этапа.
 - [x] Зафиксирована маршрутизация `proxy` / `direct` / `reject` через настоящий JSON.
 - [x] Зафиксирован точный commit ядра.
-- [x] Подготовлены и проверены 6/6 эталонных JSON.
+- [x] Подготовлены и проверены 7/7 эталонных JSON, включая Android WireGuard ClientBind.
 - [x] Пройден `go test ./dns/... ./route/rule ./experimental/libbox`.
 - [ ] До первой публичной сборки выбрать окончательные `applicationId`, namespace и имя signing key.
 - [x] Для production rule-set зафиксированы источники, лицензии, commit и SHA-256 списков.
@@ -75,7 +75,7 @@ MVP готов только когда выполнены все пункты:
 
 - [x] Чистый checkout одной командой собирает debug APK.
 - [x] APK устанавливается и открывает четыре вкладки на API 26 и современной версии Android.
-- [ ] CI подтверждает exact core revision и принимает 6/6 fixtures.
+- [ ] CI подтверждает exact core revision и принимает 7/7 fixtures.
 - [x] В release manifest нет запрещённых разрешений, второго process или второго VPN service.
 
 ## Этап 1 — профили и настоящий JSON
@@ -511,7 +511,7 @@ production default по AVD-данным не изменён.
 
 ### Финальный gate
 
-- [x] Нет failed fixture, unit или instrumented test: exact/compat fixtures 6/6,
+- [x] Нет failed fixture, unit или instrumented test: exact/compat fixtures 7/7,
   JVM 85/85, API 36 instrumented 67/67; API 26/29 baseline также пройден.
 - [ ] Нет core revision/ABI/signature mismatch. Exact core и arm64 ABI проверены; временная
   подпись прошла same-key/foreign-key/downgrade tests. Нужна последняя проверка APK,
@@ -567,8 +567,8 @@ arm64 RC и незавершённая физическая матрица из 
 ## Текущее состояние
 
 - [x] Архитектурный аудит завершён 22 июля 2026 года.
-- [x] Exact CLI: 6/6 fixtures.
-- [x] Compatibility CLI: 6/6 fixtures.
+- [x] Exact CLI: 7/7 fixtures.
+- [x] Compatibility CLI: 7/7 fixtures.
 - [x] Go packages compile/tests pass; дополнительный audit test временно встраивается в exact pinned fallback package и проверяет success/error/hang/RCODE.
 - [x] Markdown fences, локальные ссылки и SHA-256 fixtures проверены.
 - [x] Android/Gradle-проект создан.
@@ -584,12 +584,14 @@ arm64 RC и незавершённая физическая матрица из 
 - [x] Test 20 опубликован из commit `352fb31` с редактируемым DNS override; Auto DNS fallback в него ещё не входил.
 - [x] Test 21 собран локально из commit `d78ad72` для arm64-v8a, armeabi-v7a и x86_64 и опубликован с новой цепочкой Auto DNS, SHA-256 и metadata; физическая проверка остаётся открытой.
 - [x] Test 22 собран локально из commit `479a480` для arm64-v8a, armeabi-v7a и x86_64 и опубликован с Markdown-оформлением release notes, SHA-256 и metadata.
+- [x] По отчётам Test 21 подтверждён Android WireGuard GRO/standard-bind сбой: handshake и первый DNS проходят, затем return data зависает. Runtime-only direct detour переводит endpoint без явного `detour` на `ClientBind`; health-route теперь обязателен во всех DNS-режимах, а профиль без DNS получает минимальный Android fallback. Exact pinned CLI и JVM regression tests проходят; физическая проверка остаётся открытой.
 - [ ] Idle CPU/battery release-gate выполнен на физических устройствах.
 
-**Следующее действие:** установить Test 21 и на том же WireGuard-профиле проверить Auto:
-диагностика должна закончиться на DNS профиля, а при его реальной ошибке показать ровно
-один переход к DNS Android и лишь затем к DoH. «Из JSON» и DNS Android проверить отдельно
-как явные режимы без скрытой подмены. После успешного подключения повторить
+**Следующее действие:** установить следующий Test 23 и на том же WireGuard-профиле проверить
+«Из JSON», DNS Android, Auto и Secure. В effective overlay должны быть
+`wireguard_client_bind_detour_count=1`, IPv4 default allowed и точный inner MTU; Auto больше
+не имеет права завершиться через прямой IPv6 health-path. На VLESS «Из JSON» профиль без
+DNS должен получить только runtime local DNS Android. После успешного подключения повторить
 смену Wi‑Fi/mobile и длительную сессию; затем остаются физическая
 матрица этапа 8 (captive portal, IPv6-only/NAT64, камера/HTTPS subscription,
 blocked-DNS/LKG/DoH, OEM per-app/routing и энергия) и production signing key по `SIGNING.md`.

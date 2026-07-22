@@ -64,25 +64,52 @@ class RuntimeConfigBuilderTest {
     }
 
     @Test
-    fun `wireguard gets Android inner mtu without changing stored or explicit value`() {
+    fun `wireguard gets Android mtu and client bind detour only in runtime`() {
         val stored = validConfig(
             rootExtra = """
                 ,"endpoints":[
                   {"type":"wireguard","tag":"wg-default"},
-                  {"type":"wireguard","tag":"wg-explicit","mtu":1376},
+                  {"type":"wireguard","tag":"wg-explicit","mtu":1376,"detour":"custom-direct"},
                   {"type":"other","tag":"untouched"}
                 ]
             """.trimIndent(),
         )
 
         val result = RuntimeConfigBuilder.build(stored) as RuntimeConfigResult.Ready
-        val endpoints = ((JsonConfig.parse(result.json) as JsonObject)["endpoints"] as JsonArray)
+        val root = JsonConfig.parse(result.json) as JsonObject
+        val endpoints = (root["endpoints"] as JsonArray)
             .map { it as JsonObject }
+        val outbounds = (root["outbounds"] as JsonArray).map { it as JsonObject }
+        val clientBind = outbounds.single { it.string("tag") == "zapret-wireguard-direct" }
 
         assertEquals("1280", (endpoints[0]["mtu"] as JsonPrimitive).content)
+        assertEquals("zapret-wireguard-direct", endpoints[0].string("detour"))
         assertEquals("1376", (endpoints[1]["mtu"] as JsonPrimitive).content)
+        assertEquals("custom-direct", endpoints[1].string("detour"))
         assertFalse("mtu" in endpoints[2])
+        assertEquals("direct", clientBind.string("type"))
+        assertEquals("default", clientBind.string("network_strategy"))
         assertFalse("stored profile must stay untouched", "1280" in stored)
+        assertFalse("stored profile must not gain the compatibility detour", "zapret-wireguard-direct" in stored)
+    }
+
+    @Test
+    fun `wireguard compatibility detour avoids user tag collisions`() {
+        val stored = validConfig(
+            rootExtra = """
+                ,"endpoints":[{"type":"wireguard","tag":"wg"}]
+            """.trimIndent(),
+        ).replace(
+            "{\"type\":\"direct\",\"tag\":\"direct\"}",
+            "{\"type\":\"direct\",\"tag\":\"direct\"}," +
+                "{\"type\":\"direct\",\"tag\":\"zapret-wireguard-direct\"}",
+        )
+
+        val result = RuntimeConfigBuilder.build(stored) as RuntimeConfigResult.Ready
+        val root = JsonConfig.parse(result.json) as JsonObject
+        val endpoint = (root["endpoints"] as JsonArray).single() as JsonObject
+
+        assertEquals("zapret-wireguard-direct-2", endpoint.string("detour"))
     }
 
     @Test
@@ -341,6 +368,50 @@ class RuntimeConfigBuilderTest {
 
         assertFalse("zapret-dns-override" in disabled.json)
         assertFalse("zapret-dns-override" in fromJson.json)
+    }
+
+    @Test
+    fun `FromJson preserves profile DNS but always routes health through selected outbound`() {
+        val stored = validConfig(
+            rootExtra = """
+                ,"dns":{"servers":[{"type":"udp","tag":"profile-dns","server":"192.0.2.53"}],"final":"profile-dns"}
+            """.trimIndent(),
+        )
+
+        val result = RuntimeConfigBuilder.build(
+            stored,
+            options = RuntimeConfigOptions(dnsMode = DnsMode.FromJson),
+        ) as RuntimeConfigResult.Ready
+        val root = JsonConfig.parse(result.json) as JsonObject
+        val dns = root["dns"] as JsonObject
+        val rules = ((root["route"] as JsonObject)["rules"] as JsonArray)
+            .map { it as JsonObject }
+
+        assertEquals("profile-dns", dns.string("final"))
+        assertEquals(1, (dns["servers"] as JsonArray).size)
+        assertEquals("zapret-proxy", rules.first().string("outbound"))
+        assertTrue(rules.first()["domain"].toString().contains("cp.cloudflare.com"))
+    }
+
+    @Test
+    fun `FromJson without profile DNS uses minimal Android fallback`() {
+        val stored = validConfig()
+
+        val result = RuntimeConfigBuilder.build(
+            stored,
+            options = RuntimeConfigOptions(dnsMode = DnsMode.FromJson),
+        ) as RuntimeConfigResult.Ready
+        val root = JsonConfig.parse(result.json) as JsonObject
+        val dns = root["dns"] as JsonObject
+        val route = root["route"] as JsonObject
+        val rules = (route["rules"] as JsonArray).map { it as JsonObject }
+
+        assertEquals("zapret-android-dns", dns.string("final"))
+        assertEquals("local", ((dns["servers"] as JsonArray).single() as JsonObject).string("type"))
+        assertEquals("zapret-android-dns", route.string("default_domain_resolver"))
+        assertEquals("hijack-dns", rules[0].string("action"))
+        assertEquals("zapret-proxy", rules[1].string("outbound"))
+        assertFalse("stored profile must stay without a DNS section", "\"dns\"" in stored)
     }
 
     @Test
@@ -620,9 +691,12 @@ class RuntimeConfigBuilderTest {
         val server = (root["outbounds"] as JsonArray)
             .map { it as JsonObject }
             .first { it.string("tag") == "server-a" }
+        val dns = root["dns"] as JsonObject
 
         assertEquals("vpn.example", server.string("server"))
         assertEquals("zapret-bootstrap-lkg", server.string("domain_resolver"))
+        assertEquals("zapret-android-dns", dns.string("final"))
+        assertEquals(2, (dns["servers"] as JsonArray).size)
         assertFalse("stored profile must stay untouched", "domain_resolver" in stored)
     }
 

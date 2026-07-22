@@ -30,10 +30,12 @@ object EffectiveOverlaySummary {
             clashApi?.keys?.any(CLASH_LISTENER_FIELDS::contains) == true ||
                 experimental?.get("v2ray_api") is JsonObject
 
-        val managedDnsServers = (dns?.get("servers") as? JsonArray)
+        val allDnsServers = (dns?.get("servers") as? JsonArray)
             ?.mapNotNull { it as? JsonObject }
             .orEmpty()
-            .filter { it.string("tag")?.startsWith(MANAGED_PREFIX) == true }
+        val managedDnsServers = allDnsServers.filter {
+            it.string("tag")?.startsWith(MANAGED_PREFIX) == true
+        }
         val managedDnsRules = (dns?.get("rules") as? JsonArray)
             ?.mapNotNull { it as? JsonObject }
             .orEmpty()
@@ -42,6 +44,10 @@ object EffectiveOverlaySummary {
             ?.mapNotNull { it as? JsonObject }
             .orEmpty()
             .filter(::isManagedRouteRule)
+        val healthProbeRouteCount = (route?.get("rules") as? JsonArray)
+            ?.mapNotNull { it as? JsonObject }
+            .orEmpty()
+            .count(::isHealthProbeRoute)
         val managedRuleSets = (route?.get("rule_set") as? JsonArray)
             ?.mapNotNull { it as? JsonObject }
             .orEmpty()
@@ -64,6 +70,14 @@ object EffectiveOverlaySummary {
             ?.mapNotNull { it as? JsonObject }
             .orEmpty()
             .filter { it.string("type") == "wireguard" }
+        val wireGuardPeers = wireGuardEndpoints.flatMap { endpoint ->
+            (endpoint["peers"] as? JsonArray)?.mapNotNull { it as? JsonObject }.orEmpty()
+        }
+        val wireGuardAllowedPrefixes = wireGuardPeers.flatMap { peer ->
+            (peer["allowed_ips"] as? JsonArray)
+                ?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
+                .orEmpty()
+        }
 
         return JsonConfig.format(
             buildJsonObject {
@@ -103,6 +117,12 @@ object EffectiveOverlaySummary {
                         }
                     },
                 )
+                put("dns_total_server_count", allDnsServers.size)
+                put("dns_profile_server_count", allDnsServers.size - managedDnsServers.size)
+                put(
+                    "dns_android_fallback_active",
+                    dnsMode == DnsMode.FromJson && dns?.string("final") == ANDROID_DNS_TAG,
+                )
                 put("dns_rule_count", managedDnsRules.size)
                 put(
                     "proxy_transport_types",
@@ -117,7 +137,36 @@ object EffectiveOverlaySummary {
                         }.distinct().map(::JsonPrimitive),
                     ),
                 )
+                put("wireguard_peer_count", wireGuardPeers.size)
+                put(
+                    "wireguard_client_bind_detour_count",
+                    wireGuardEndpoints.count {
+                        it.string("detour")?.startsWith(WIREGUARD_DIRECT_PREFIX) == true
+                    },
+                )
+                put(
+                    "wireguard_custom_detour_count",
+                    wireGuardEndpoints.count {
+                        val detour = it.string("detour")
+                        detour != null && !detour.startsWith(WIREGUARD_DIRECT_PREFIX)
+                    },
+                )
+                put(
+                    "wireguard_system_endpoint_count",
+                    wireGuardEndpoints.count { it.boolean("system") == true },
+                )
+                put("wireguard_allowed_ipv4_default", "0.0.0.0/0" in wireGuardAllowedPrefixes)
+                put("wireguard_allowed_ipv6_default", "::/0" in wireGuardAllowedPrefixes)
+                put(
+                    "wireguard_local_ipv4_count",
+                    wireGuardEndpoints.sumOf { it.addressFamilyCount(ipv6 = false) },
+                )
+                put(
+                    "wireguard_local_ipv6_count",
+                    wireGuardEndpoints.sumOf { it.addressFamilyCount(ipv6 = true) },
+                )
                 put("route_rule_count", managedRouteRules.size)
+                put("health_probe_route_count", healthProbeRouteCount)
                 put(
                     "route_actions",
                     JsonArray(
@@ -156,6 +205,12 @@ object EffectiveOverlaySummary {
             rule.string("outbound")?.startsWith(MANAGED_PREFIX) == true ||
             rule.values.any(::containsManagedTag)
 
+    private fun isHealthProbeRoute(rule: JsonObject): Boolean =
+        rule.string("action") == "route" &&
+            (rule["domain"] as? JsonArray)
+                ?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
+                ?.containsAll(HEALTH_PROBE_HOSTS) == true
+
     private fun containsManagedTag(element: JsonElement): Boolean = when (element) {
         is JsonPrimitive -> element.contentOrNull?.startsWith(MANAGED_PREFIX) == true
         is JsonArray -> element.any(::containsManagedTag)
@@ -167,6 +222,10 @@ object EffectiveOverlaySummary {
     private fun JsonObject?.hasAddressFamily(ipv6: Boolean): Boolean =
         ((this?.get("address") as? JsonArray)?.mapNotNull { it.jsonPrimitive.contentOrNull }).orEmpty()
             .any { address -> (':' in address) == ipv6 }
+
+    private fun JsonObject.addressFamilyCount(ipv6: Boolean): Int =
+        ((this["address"] as? JsonArray)?.mapNotNull { it.jsonPrimitive.contentOrNull }).orEmpty()
+            .count { address -> (':' in address) == ipv6 }
 
     private fun JsonObject.boolean(key: String): Boolean? =
         (this[key] as? JsonPrimitive)?.booleanOrNull
@@ -187,4 +246,11 @@ object EffectiveOverlaySummary {
     private val TOKEN = Regex("[a-zA-Z0-9_-]+")
     private const val MANAGED_PREFIX = "zapret-"
     private const val BOOTSTRAP_TAG = "zapret-bootstrap-lkg"
+    private const val ANDROID_DNS_TAG = "zapret-android-dns"
+    private const val WIREGUARD_DIRECT_PREFIX = "zapret-wireguard-direct"
+    private val HEALTH_PROBE_HOSTS = setOf(
+        "cp.cloudflare.com",
+        "connectivitycheck.gstatic.com",
+        "dns.opendns.com",
+    )
 }

@@ -25,9 +25,15 @@ class EffectiveOverlaySummaryTest {
               "route":{"rules":[
                 {"domain_suffix":["private.example"],"outbound":"direct"},
                 {"protocol":"dns","action":"hijack-dns"},
+                {"domain":["cp.cloudflare.com","connectivitycheck.gstatic.com","dns.opendns.com"],"action":"route","outbound":"server"},
                 {"rule_set":["zapret-ru"],"outbound":"zapret-proxy"}
               ],"rule_set":[{"tag":"zapret-ru","type":"local","format":"binary","path":"/secret/geo.srs"}]},
-              "endpoints":[{"type":"wireguard","tag":"zapret-proxy","mtu":1280,"private_key":"top-secret"}],
+              "endpoints":[{
+                "type":"wireguard","tag":"zapret-proxy","mtu":1280,
+                "address":["10.8.0.2/32"],"private_key":"top-secret",
+                "detour":"zapret-wireguard-direct",
+                "peers":[{"public_key":"top-secret","allowed_ips":["0.0.0.0/0"]}]
+              }],
               "outbounds":[{"type":"vless","tag":"server","server":"vpn.example","uuid":"123e4567-e89b-12d3-a456-426614174000","password":"top-secret"}]
             }
         """.trimIndent()
@@ -47,6 +53,9 @@ class EffectiveOverlaySummaryTest {
         assertEquals("0", (vpnHiding["non_tun_inbound_count"] as JsonPrimitive).content)
         assertFalse((vpnHiding["local_control_endpoint_present"] as JsonPrimitive).boolean)
         assertEquals(2, (summary["dns_servers"] as JsonArray).size)
+        assertEquals("3", (summary["dns_total_server_count"] as JsonPrimitive).content)
+        assertEquals("1", (summary["dns_profile_server_count"] as JsonPrimitive).content)
+        assertFalse((summary["dns_android_fallback_active"] as JsonPrimitive).boolean)
         assertEquals(
             "wireguard",
             ((summary["proxy_transport_types"] as JsonArray).single() as JsonPrimitive).content,
@@ -56,8 +65,16 @@ class EffectiveOverlaySummaryTest {
             "1280",
             ((summary["wireguard_mtu_values"] as JsonArray).single() as JsonPrimitive).content,
         )
+        assertEquals("1", (summary["wireguard_peer_count"] as JsonPrimitive).content)
+        assertEquals("1", (summary["wireguard_client_bind_detour_count"] as JsonPrimitive).content)
+        assertEquals("0", (summary["wireguard_custom_detour_count"] as JsonPrimitive).content)
+        assertTrue((summary["wireguard_allowed_ipv4_default"] as JsonPrimitive).boolean)
+        assertFalse((summary["wireguard_allowed_ipv6_default"] as JsonPrimitive).boolean)
+        assertEquals("1", (summary["wireguard_local_ipv4_count"] as JsonPrimitive).content)
+        assertEquals("0", (summary["wireguard_local_ipv6_count"] as JsonPrimitive).content)
         assertTrue((summary["proxy_ipv4_only"] as JsonPrimitive).boolean)
         assertEquals("2", (summary["route_rule_count"] as JsonPrimitive).content)
+        assertEquals("1", (summary["health_probe_route_count"] as JsonPrimitive).content)
         assertEquals("1", (summary["bootstrap_address_count"] as JsonPrimitive).content)
     }
 

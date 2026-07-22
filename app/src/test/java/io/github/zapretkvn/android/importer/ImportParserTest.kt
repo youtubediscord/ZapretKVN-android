@@ -61,11 +61,20 @@ class ImportParserTest {
         assertEquals("wireguard-out", ((route["rules"] as JsonArray)[1] as JsonObject).string("outbound"))
         assertEquals("wireguard-out", (dnsServers[1] as JsonObject).string("detour"))
         assertEquals("wireguard-out", (dnsServers[2] as JsonObject).string("detour"))
+        val fromJson = RuntimeConfigBuilder.build(
+            candidate.json,
+            options = RuntimeConfigOptions(dnsMode = DnsMode.FromJson),
+        ) as RuntimeConfigResult.Ready
+        val fromJsonRoot = JsonConfig.parse(fromJson.json) as JsonObject
+        val runtimeEndpoint = (fromJsonRoot["endpoints"] as JsonArray).single() as JsonObject
+        val runtimeRouteRules = ((fromJsonRoot["route"] as JsonObject)["rules"] as JsonArray)
+            .map { it as JsonObject }
+        assertEquals("zapret-wireguard-direct", runtimeEndpoint.string("detour"))
         assertTrue(
-            RuntimeConfigBuilder.build(
-                candidate.json,
-                options = RuntimeConfigOptions(dnsMode = DnsMode.FromJson),
-            ) is RuntimeConfigResult.Ready,
+            runtimeRouteRules.any {
+                it.string("outbound") == "wireguard-out" &&
+                    it["domain"].toString().contains("cp.cloudflare.com")
+            },
         )
         val automatic = RuntimeConfigBuilder.build(
             candidate.json,

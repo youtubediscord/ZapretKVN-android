@@ -81,7 +81,7 @@ object RuntimeConfigBuilder {
             is RuntimeHardeningResult.Ready -> hardened.root
             is RuntimeHardeningResult.Blocked -> return invalid(hardened.message)
         }
-        val root = applyAndroidWireGuardDefaults(hardenedRoot)
+        val root = applyAndroidWireGuardCompatibility(hardenedRoot)
 
         findForbiddenField(root)?.let { field ->
             return invalid("Поле '$field' несовместимо с Android VPN и запрещено в MVP.")
@@ -199,27 +199,54 @@ object RuntimeConfigBuilder {
     }
 
     /**
-     * The outer Android TUN and the inner userspace WireGuard endpoint have separate MTUs.
-     * Amnezia uses 1280 for WireGuard/AWG on Android, while sing-box defaults the inner
-     * endpoint to 1408. Apply the Android value only when the profile did not choose one;
-     * the stored JSON remains unchanged.
+     * Applies Android-only userspace WireGuard compatibility to the runtime copy.
+     * The endpoint keeps an explicit MTU/detour; otherwise it gets the conservative
+     * Amnezia MTU and a direct detour that selects sing-box ClientBind instead of GRO.
      */
-    private fun applyAndroidWireGuardDefaults(root: JsonObject): JsonObject {
+    private fun applyAndroidWireGuardCompatibility(root: JsonObject): JsonObject {
         val endpoints = root["endpoints"] as? JsonArray ?: return root
+        val storedOutbounds = (root["outbounds"] as? JsonArray)?.toList().orEmpty()
+        val occupiedTags = storedOutbounds.mapNotNull { (it as? JsonObject)?.string("tag") }.toSet()
+        val clientBindTag = generateSequence(ANDROID_WIREGUARD_DIRECT_TAG) { current ->
+            val suffix = current.substringAfterLast('-', missingDelimiterValue = "1").toIntOrNull() ?: 1
+            "$ANDROID_WIREGUARD_DIRECT_TAG-${suffix + 1}"
+        }.first { it !in occupiedTags }
         var changed = false
+        var needsClientBind = false
         val runtimeEndpoints = JsonArray(endpoints.map { element ->
             val endpoint = element as? JsonObject
-            if (endpoint?.string("type") == "wireguard" && "mtu" !in endpoint) {
+            if (endpoint?.string("type") != "wireguard") return@map element
+            val runtimeEndpoint = endpoint.toMutableMap()
+            if ("mtu" !in endpoint) {
+                runtimeEndpoint["mtu"] = JsonPrimitive(ANDROID_WIREGUARD_MTU)
                 changed = true
-                JsonObject(endpoint.toMutableMap().apply {
-                    this["mtu"] = JsonPrimitive(ANDROID_WIREGUARD_MTU)
-                })
-            } else {
-                element
             }
+            if (endpoint.boolean("system") != true && endpoint.string("detour").isNullOrBlank()) {
+                // The standard WireGuard bind enables GRO on Android. It can complete the
+                // handshake while dropping or severely delaying return traffic on real devices.
+                // A direct detour selects sing-box ClientBind (batch size 1) without changing
+                // the saved profile or routing application traffic through a second proxy.
+                runtimeEndpoint["detour"] = JsonPrimitive(clientBindTag)
+                needsClientBind = true
+                changed = true
+            }
+            JsonObject(runtimeEndpoint)
         })
         if (!changed) return root
-        return JsonObject(root.toMutableMap().apply { this["endpoints"] = runtimeEndpoints })
+        return JsonObject(root.toMutableMap().apply {
+            this["endpoints"] = runtimeEndpoints
+            if (needsClientBind) {
+                this["outbounds"] = JsonArray(
+                    storedOutbounds + buildJsonObject {
+                        put("type", "direct")
+                        put("tag", clientBindTag)
+                        // Makes the detour non-empty and lets Android's platform network
+                        // strategy select/protect the real Wi-Fi or cellular interface.
+                        put("network_strategy", "default")
+                    },
+                )
+            }
+        })
     }
 
     /** Adds a process-scoped rule only to the temporary in-memory updater session. */
@@ -253,13 +280,17 @@ object RuntimeConfigBuilder {
         selectedProxyTag: String?,
         bootstrapHost: BootstrapHostOverlay?,
     ): RuntimeConfigResult {
-        if (mode == DnsMode.FromJson && bootstrapHost == null) {
-            return RuntimeConfigResult.Ready(JsonConfig.format(root))
-        }
         val next = root.toMutableMap()
         var dns = (root["dns"] as? JsonObject)?.toMutableMap() ?: mutableMapOf()
-        var servers = ((dns["servers"] as? JsonArray)?.toList().orEmpty())
-            .filterNot { (it as? JsonObject)?.string("tag") in GENERATED_DNS_SERVER_TAGS }
+        val profileServers = (dns["servers"] as? JsonArray)?.toList().orEmpty()
+        var servers = if (mode in MANAGED_DNS_MODES) {
+            profileServers.filterNot {
+                (it as? JsonObject)?.string("tag") in GENERATED_DNS_SERVER_TAGS
+            }
+        } else {
+            profileServers
+        }
+        val fromJsonNeedsAndroidFallback = mode == DnsMode.FromJson && profileServers.isEmpty()
 
         if (mode in MANAGED_DNS_MODES) {
             val normalizedOverride = if (dnsOverride.enabled) {
@@ -310,6 +341,11 @@ object RuntimeConfigBuilder {
                     DnsMode.FromJson -> error("unreachable")
                 },
             )
+        } else if (fromJsonNeedsAndroidFallback) {
+            // "From JSON" keeps a real profile DNS untouched. A generated/imported profile
+            // with no DNS section has nothing to use, so fall back only then to Android DNS.
+            servers = servers + androidDnsServer()
+            dns["final"] = JsonPrimitive(ANDROID_DNS_TAG)
         }
 
         bootstrapHost?.let { overlay ->
@@ -327,20 +363,28 @@ object RuntimeConfigBuilder {
                 )
             }
         }
-        dns["servers"] = JsonArray(servers)
-        next["dns"] = JsonObject(dns)
+        if (mode in MANAGED_DNS_MODES || fromJsonNeedsAndroidFallback || bootstrapHost != null) {
+            dns["servers"] = JsonArray(servers)
+            next["dns"] = JsonObject(dns)
+        }
 
-        if (mode in MANAGED_DNS_MODES) {
+        if (mode in MANAGED_DNS_MODES || fromJsonNeedsAndroidFallback || selectedProxyTag != null) {
             val route = (root["route"] as? JsonObject)?.toMutableMap()
                 ?: return invalid("В конфигурации отсутствует route.")
-            val existing = ((route["rules"] as? JsonArray)?.toList().orEmpty())
-                .filterNot(::isGeneratedRouteRule)
+            val existingRules = (route["rules"] as? JsonArray)?.toList().orEmpty()
+            val existing = if (mode in MANAGED_DNS_MODES) {
+                existingRules.filterNot(::isGeneratedRouteRule)
+            } else {
+                existingRules
+            }
             val generatedRouteRules = buildList {
-                add(hijackDnsRule())
+                if (mode in MANAGED_DNS_MODES || fromJsonNeedsAndroidFallback) add(hijackDnsRule())
                 selectedProxyTag?.let { add(healthProbeRule(it)) }
             }
             route["rules"] = JsonArray(generatedRouteRules + existing)
-            route["default_domain_resolver"] = JsonPrimitive(ANDROID_DNS_TAG)
+            if (mode in MANAGED_DNS_MODES || fromJsonNeedsAndroidFallback) {
+                route["default_domain_resolver"] = JsonPrimitive(ANDROID_DNS_TAG)
+            }
             next["route"] = JsonObject(route)
         }
         return RuntimeConfigResult.Ready(JsonConfig.format(JsonObject(next)))
@@ -729,6 +773,7 @@ object RuntimeConfigBuilder {
     private val PROXY_DNS_MODES = setOf(DnsMode.Automatic, DnsMode.Secure)
     private const val ANDROID_DNS_TAG = "zapret-android-dns"
     private const val ANDROID_WIREGUARD_MTU = 1280
+    private const val ANDROID_WIREGUARD_DIRECT_TAG = "zapret-wireguard-direct"
     private const val DOH_1_TAG = "zapret-doh-1"
     private const val DOH_2_TAG = "zapret-doh-2"
     private const val DOH_3_TAG = "zapret-doh-3"

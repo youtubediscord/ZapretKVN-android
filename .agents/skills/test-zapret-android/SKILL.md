@@ -162,6 +162,14 @@ For the Android WireGuard roaming fix, record both `core.revision` and
 MTU, device and network; the patch is implemented but its causal effect is not proven
 until the physical A/B succeeds.
 
+For userspace WireGuard, also inspect `wireguard_client_bind_detour_count`, peer
+count, local address families, default IPv4/IPv6 AllowedIPs and inner MTU in the
+effective overlay. The pinned sing-box standard bind enables Android GRO and can
+show a successful handshake followed by no or extremely slow return data. Zapret KVN
+adds a runtime-only direct detour to endpoints without an explicit detour so the core
+uses `ClientBind`; a user-supplied detour remains untouched. A handshake response
+proves only the outer UDP/key path, not usable inner TCP/UDP traffic.
+
 For routing/per-app failures, also record the selected package, include/exclude mode, whether the control app was selected, and IPv4/IPv6/TCP/UDP/QUIC result without including credentials.
 
 ## Interpret the layers separately

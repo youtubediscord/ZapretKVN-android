@@ -1280,7 +1280,7 @@ private fun DnsMode.description(): String = when (this) {
     DnsMode.Automatic -> "DNS профиля → DNS Android → DoH. Переход только после подтверждённой ошибки."
     DnsMode.Android -> "Системный resolver и Private DNS Android остаются источником истины."
     DnsMode.Secure -> "Стандартный DNS выбранных приложений идёт в DoH через proxy."
-    DnsMode.FromJson -> "DNS-секция профиля запускается без managed-подмены."
+    DnsMode.FromJson -> "DNS профиля используется как есть; если его нет — local DNS Android без DoH."
 }
 
 private fun TunMtuMode.displayName(): String = when (this) {
