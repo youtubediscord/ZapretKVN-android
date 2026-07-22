@@ -1,4 +1,5 @@
 # Zapret KVN Android
+<img width="1916" height="821" alt="image" src="https://github.com/user-attachments/assets/b73f9815-b392-41e8-a94d-aaf316086715" />
 
 Нативный Material 3 клиент для `sing-box-extended` с per-app VPN, импортом ссылок/подписок и настоящим sing-box JSON как единственным источником сетевой конфигурации.
 
