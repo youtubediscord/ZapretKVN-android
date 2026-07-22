@@ -21,7 +21,10 @@ class ConfigAnalyzerOutboundTest {
 
         assertEquals("vless", descriptions.getValue("Moscow").type)
         assertEquals("vpn.example:443", descriptions.getValue("Moscow").endpoint)
+        assertEquals("vpn.example", descriptions.getValue("Moscow").serverHost)
         assertEquals("[2001:db8::1]:8443", descriptions.getValue("IPv6").endpoint)
+        assertEquals("2001:db8::1", descriptions.getValue("IPv6").serverHost)
         assertNull(descriptions.getValue("direct").endpoint)
+        assertNull(descriptions.getValue("direct").serverHost)
     }
 }

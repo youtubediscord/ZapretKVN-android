@@ -13,4 +13,13 @@ class HomeFormattingTest {
         assertEquals("01:05", formatDuration(65_000))
         assertEquals("1:01:01", formatDuration(3_661_000))
     }
+
+    @Test
+    fun `ping switches to compact seconds above one second`() {
+        assertEquals("—", formatPing(null))
+        assertEquals("999 мс", formatPing(999))
+        assertEquals("1 с", formatPing(1_000))
+        assertEquals("1,98 с", formatPing(1_978))
+        assertEquals("2 с", formatPing(1_999))
+    }
 }

@@ -55,6 +55,7 @@ import io.github.zapretkvn.android.vpn.RuntimeSelectorGroup
 import io.github.zapretkvn.android.vpn.TrafficSample
 import io.github.zapretkvn.android.vpn.VpnConnectionState
 import io.github.zapretkvn.android.vpn.VpnSessionStats
+import io.github.zapretkvn.android.vpn.primaryGroup
 import kotlinx.coroutines.delay
 import kotlin.math.max
 
@@ -78,9 +79,7 @@ internal fun HomeScreen(
 ) {
     var serverSheetOpen by rememberSaveable { mutableStateOf(false) }
     val connected = vpnState as? VpnConnectionState.Connected
-    val currentGroup = selectorGroups.firstOrNull { group ->
-        group.selectable && group.items.any { it.tag == group.selected }
-    } ?: selectorGroups.firstOrNull { it.items.isNotEmpty() }
+    val currentGroup = selectorGroups.primaryGroup()
     val currentServer = currentGroup?.items?.firstOrNull { it.tag == currentGroup.selected }
 
     Column(
@@ -481,4 +480,12 @@ internal fun formatDuration(millis: Long): String {
     return if (hours > 0) "%d:%02d:%02d".format(hours, minutes, rest) else "%02d:%02d".format(minutes, rest)
 }
 
-private fun formatPing(value: Long?): String = value?.let { "$it мс" } ?: "—"
+internal fun formatPing(value: Long?): String {
+    val millis = value?.coerceAtLeast(0) ?: return "—"
+    if (millis < 1_000) return "$millis мс"
+
+    val hundredths = millis / 10 + if (millis % 10 >= 5) 1 else 0
+    val seconds = hundredths / 100
+    val fraction = (hundredths % 100).toString().padStart(2, '0').trimEnd('0')
+    return if (fraction.isEmpty()) "$seconds с" else "$seconds,$fraction с"
+}

@@ -1,19 +1,12 @@
 package io.github.zapretkvn.android.vpn
 
-import android.annotation.SuppressLint
-import android.content.Context
-import android.net.ConnectivityManager
 import android.net.Network
-import android.net.NetworkCapabilities
-import android.os.Handler
-import android.os.Looper
 import io.github.zapretkvn.android.config.BootstrapConfig
 import io.github.zapretkvn.android.config.BootstrapHostOverlay
 import io.github.zapretkvn.android.config.DnsMode
 import io.github.zapretkvn.android.config.ProxyBootstrapTarget
 import java.io.DataInputStream
 import java.io.DataOutputStream
-import java.io.InputStream
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetAddress
@@ -24,13 +17,10 @@ import java.util.concurrent.ThreadLocalRandom
 import javax.net.ssl.HttpsURLConnection
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
-import kotlin.coroutines.resume
 
 data class HealthCheckResult(
-    val pingMillis: Long?,
     val externalIpProbeAllowed: Boolean,
 )
 
@@ -144,9 +134,9 @@ class ProxyBootstrapper(
     }
 }
 
-class VpnHealthPipeline(context: Context) {
-    private val connectivity = context.applicationContext
-        .getSystemService(ConnectivityManager::class.java)
+class VpnHealthPipeline(
+    private val vpnNetworks: VpnNetworkProvider,
+) {
     private val resolver = BootstrapResolver()
 
     suspend fun verify(
@@ -159,13 +149,11 @@ class VpnHealthPipeline(context: Context) {
             error("Тестовая ошибка health-check DNS/HTTPS.")
         }
         if (VpnTestHooks.consumeHealthSuccessOverride()) {
-            return HealthCheckResult(pingMillis = null, externalIpProbeAllowed = false)
+            return HealthCheckResult(externalIpProbeAllowed = false)
         }
         return withTimeout(HEALTH_TIMEOUT_MILLIS) {
-            val vpnNetwork = awaitVpnNetwork()
-            check(connectivity.activeNetwork == vpnNetwork) {
-                "VPN ещё не стал сетью по умолчанию для health-check UID."
-            }
+            val vpnNetwork = vpnNetworks.awaitActive()
+            vpnNetworks.requireActive(vpnNetwork)
             onStage(VpnHealthStage.DnsProbe)
             if (VpnTestHooks.consumeDnsProbeFailure()) {
                 error("DNS через VPN не отвечает: тестовый внутренний DNS недоступен.")
@@ -185,76 +173,10 @@ class VpnHealthPipeline(context: Context) {
             if (VpnTestHooks.consumeHttpsProbeFailure()) {
                 error("HTTPS-проверка через VPN не прошла: тестовый endpoint недоступен.")
             }
-            HealthCheckResult(
-                pingMillis = httpsProbe(),
-                externalIpProbeAllowed = true,
-            )
+            httpsProbe(vpnNetwork)
+            HealthCheckResult(externalIpProbeAllowed = true)
         }
     }
-
-    suspend fun measurePing(): Long = withTimeout(HEALTH_TIMEOUT_MILLIS) {
-        val vpnNetwork = awaitVpnNetwork()
-        check(connectivity.activeNetwork == vpnNetwork) { "VPN не является активной сетью приложения." }
-        httpsProbe()
-    }
-
-    suspend fun fetchExternalIp(): String = withTimeout(HTTPS_TIMEOUT_MILLIS.toLong()) {
-        withContext(Dispatchers.IO) {
-            val connection = URL(EXTERNAL_IP_URL).openConnection() as HttpsURLConnection
-            try {
-                connection.connectTimeout = HTTPS_TIMEOUT_MILLIS
-                connection.readTimeout = HTTPS_TIMEOUT_MILLIS
-                connection.instanceFollowRedirects = false
-                connection.useCaches = false
-                connection.requestMethod = "GET"
-                val status = connection.responseCode
-                if (status != 200) error("IP endpoint вернул HTTP $status.")
-                val value = connection.inputStream.use(::readBoundedExternalIp)
-                ExternalIpParser.parse(value) ?: error("IP endpoint вернул некорректный адрес.")
-            } finally {
-                connection.disconnect()
-            }
-        }
-    }
-
-    private fun readBoundedExternalIp(input: InputStream): String {
-        val buffer = ByteArray(MAX_EXTERNAL_IP_CHARS + 1)
-        var count = 0
-        while (count < buffer.size) {
-            val read = input.read(buffer, count, buffer.size - count)
-            if (read < 0) break
-            count += read
-        }
-        require(count <= MAX_EXTERNAL_IP_CHARS) { "IP endpoint вернул слишком длинный ответ." }
-        return buffer.decodeToString(0, count)
-    }
-
-    @SuppressLint("MissingPermission")
-    private suspend fun awaitVpnNetwork(): Network {
-        connectivity.activeNetwork?.takeIf(::isVpn)?.let { return it }
-        return suspendCancellableCoroutine { continuation ->
-            val unregistered = java.util.concurrent.atomic.AtomicBoolean(false)
-            lateinit var callback: ConnectivityManager.NetworkCallback
-            fun unregister() {
-                if (unregistered.compareAndSet(false, true)) {
-                    runCatching { connectivity.unregisterNetworkCallback(callback) }
-                }
-            }
-            callback = object : ConnectivityManager.NetworkCallback() {
-                override fun onAvailable(network: Network) {
-                    if (isVpn(network) && continuation.isActive) {
-                        unregister()
-                        continuation.resume(network)
-                    }
-                }
-            }
-            connectivity.registerDefaultNetworkCallback(callback, Handler(Looper.getMainLooper()))
-            continuation.invokeOnCancellation { unregister() }
-        }
-    }
-
-    private fun isVpn(network: Network): Boolean = connectivity.getNetworkCapabilities(network)
-        ?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true
 
     private suspend fun rawDnsProbe(dnsServer: String, hostname: String) =
         withContext(Dispatchers.IO) {
@@ -308,19 +230,17 @@ class VpnHealthPipeline(context: Context) {
         }
     }
 
-    private suspend fun httpsProbe(): Long = withContext(Dispatchers.IO) {
-        val startedAt = System.nanoTime()
-        val connection = URL(HEALTH_URL).openConnection() as HttpsURLConnection
+    private suspend fun httpsProbe(vpnNetwork: Network) = withContext(Dispatchers.IO) {
+        val connection = vpnNetwork.openConnection(URL(HEALTH_URL)) as HttpsURLConnection
         try {
             connection.connectTimeout = HTTPS_TIMEOUT_MILLIS
             connection.readTimeout = HTTPS_TIMEOUT_MILLIS
             connection.instanceFollowRedirects = false
             connection.useCaches = false
+            connection.setRequestProperty("Connection", "close")
             connection.requestMethod = "GET"
             val status = connection.responseCode
-            if (status !in 200..399) error("HTTPS-проверка через VPN вернула HTTP $status.")
-            runCatching { connection.inputStream.use { it.read() } }
-            ((System.nanoTime() - startedAt) / 1_000_000L).coerceAtLeast(0)
+            if (status != 204) error("HTTPS-проверка через VPN вернула HTTP $status вместо 204.")
         } catch (error: Throwable) {
             throw IllegalStateException("HTTPS-проверка через VPN не прошла.", error)
         } finally {
@@ -356,11 +276,9 @@ class VpnHealthPipeline(context: Context) {
     private companion object {
         const val HEALTH_HOST = "connectivitycheck.gstatic.com"
         const val HEALTH_URL = "https://connectivitycheck.gstatic.com/generate_204"
-        const val EXTERNAL_IP_URL = "https://api64.ipify.org"
         const val HEALTH_TIMEOUT_MILLIS = 10_000L
         const val DNS_TIMEOUT_MILLIS = 2_500
         const val HTTPS_TIMEOUT_MILLIS = 5_000
         const val MAX_DNS_PACKET = 65_535
-        const val MAX_EXTERNAL_IP_CHARS = 45
     }
 }

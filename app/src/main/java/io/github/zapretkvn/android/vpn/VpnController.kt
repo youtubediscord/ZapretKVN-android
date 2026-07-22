@@ -25,6 +25,11 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 
+private data class ServerPingMeasurement(
+    val millis: Int,
+    val measuredAtEpochSeconds: Long,
+)
+
 class VpnController(
     private val context: Context,
     previousCrash: AppCrashRecord? = null,
@@ -38,6 +43,9 @@ class VpnController(
     private val trafficAccumulator = SessionTrafficAccumulator()
     private val mutableSessionStats = MutableStateFlow(trafficAccumulator.value)
     private val trafficLock = Any()
+    private val serverPingLock = Any()
+    private val serverPings = mutableMapOf<String, ServerPingMeasurement>()
+    private var serverPingGeneration = Long.MIN_VALUE
     private val latestGeneration = AtomicLong(0)
 
     val state: StateFlow<VpnConnectionState> = mutableState.asStateFlow()
@@ -116,6 +124,12 @@ class VpnController(
             val previous = latestGeneration.get()
             if (generation < previous) return
             if (latestGeneration.compareAndSet(previous, generation)) break
+        }
+        synchronized(serverPingLock) {
+            if (serverPingGeneration != generation) {
+                serverPings.clear()
+                serverPingGeneration = generation
+            }
         }
         val safeState = if (state is VpnConnectionState.Error) {
             val message = sanitizeDiagnosticText(state.message, 360)
@@ -223,7 +237,51 @@ class VpnController(
 
     internal fun publishGroups(generation: Long, groups: List<RuntimeSelectorGroup>) {
         if (generation < latestGeneration.get()) return
-        mutableGroups.value = groups
+        synchronized(serverPingLock) {
+            val measurements = if (serverPingGeneration == generation) serverPings else emptyMap()
+            mutableGroups.value = groups.map { group ->
+                group.copy(
+                    items = group.items.map { item ->
+                        measurements[item.tag]?.let { measurement ->
+                            item.copy(
+                                pingMillis = measurement.millis,
+                                pingMeasuredAtEpochSeconds = measurement.measuredAtEpochSeconds,
+                            )
+                        } ?: item
+                    },
+                )
+            }
+        }
+    }
+
+    internal fun publishServerPing(generation: Long, outboundTag: String, pingMillis: Long?) {
+        if (generation != currentGeneration() || outboundTag.isBlank()) return
+        val measurement = pingMillis?.let {
+            ServerPingMeasurement(
+                millis = it.coerceIn(0, Int.MAX_VALUE.toLong()).toInt(),
+                measuredAtEpochSeconds = System.currentTimeMillis() / 1_000L,
+            )
+        }
+        synchronized(serverPingLock) {
+            if (serverPingGeneration != generation) {
+                serverPings.clear()
+                serverPingGeneration = generation
+            }
+            if (measurement == null) serverPings.remove(outboundTag)
+            else serverPings[outboundTag] = measurement
+            mutableGroups.update { groups ->
+                groups.map { group ->
+                    group.copy(
+                        items = group.items.map { item ->
+                            if (item.tag != outboundTag) item else item.copy(
+                                pingMillis = measurement?.millis,
+                                pingMeasuredAtEpochSeconds = measurement?.measuredAtEpochSeconds,
+                            )
+                        },
+                    )
+                }
+            }
+        }
     }
 
     internal fun publishSelection(generation: Long, groupTag: String, outboundTag: String) {

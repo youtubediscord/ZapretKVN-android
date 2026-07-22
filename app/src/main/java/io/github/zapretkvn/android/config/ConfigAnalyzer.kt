@@ -19,6 +19,7 @@ data class SelectorGroup(
 data class OutboundDescription(
     val tag: String,
     val type: String,
+    val serverHost: String?,
     val endpoint: String?,
 )
 
@@ -64,7 +65,7 @@ object ConfigAnalyzer {
                 val printableHost = if (':' in host && !host.startsWith('[')) "[$host]" else host
                 if (port.isNullOrBlank()) printableHost else "$printableHost:$port"
             }
-            tag to OutboundDescription(tag, type, endpoint)
+            tag to OutboundDescription(tag, type, server, endpoint)
         }.toMap()
     }
 

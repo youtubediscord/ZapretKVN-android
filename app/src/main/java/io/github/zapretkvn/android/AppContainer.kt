@@ -20,10 +20,13 @@ import io.github.zapretkvn.android.vpn.AppCatalog
 import io.github.zapretkvn.android.vpn.AppSelectionStore
 import io.github.zapretkvn.android.vpn.AppsViewModel
 import io.github.zapretkvn.android.vpn.LibboxRuntime
+import io.github.zapretkvn.android.vpn.IcmpPingProbe
 import io.github.zapretkvn.android.vpn.VpnAppScopePreflight
 import io.github.zapretkvn.android.vpn.VpnController
 import io.github.zapretkvn.android.vpn.ProxyBootstrapper
+import io.github.zapretkvn.android.vpn.VpnExternalIpProbe
 import io.github.zapretkvn.android.vpn.VpnHealthPipeline
+import io.github.zapretkvn.android.vpn.VpnNetworkProvider
 import java.io.File
 
 class AppContainer(
@@ -65,7 +68,10 @@ class AppContainer(
     val bootstrapCache = BootstrapCache(File(appContext.noBackupFilesDir, "network"))
     val ruleSetAssetManager = RuleSetAssetManager(appContext)
     val proxyBootstrapper = ProxyBootstrapper(BootstrapResolver(), bootstrapCache)
-    val vpnHealthPipeline = VpnHealthPipeline(appContext)
+    private val vpnNetworkProvider = VpnNetworkProvider(appContext)
+    val vpnHealthPipeline = VpnHealthPipeline(vpnNetworkProvider)
+    val vpnExternalIpProbe = VpnExternalIpProbe(vpnNetworkProvider)
+    val icmpPingProbe = IcmpPingProbe()
 
     val profilesViewModelFactory: ProfilesViewModel.Factory
         get() = ProfilesViewModel.Factory(
