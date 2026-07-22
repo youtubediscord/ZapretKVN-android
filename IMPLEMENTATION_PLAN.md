@@ -376,10 +376,10 @@ service/core/TUN. Probe receiver существует только в debug sour
 
 Цель: безопасный GitHub Release без динамического ядра и мусора.
 
-- [x] `I7-01` Реализовать ручную проверку GitHub Releases для Stable/Beta.
+- [x] `I7-01` Проверять GitHub Releases один раз при запуске и вручную: Stable принимает только обычный release, Beta — любой prerelease; при обновлении показывать release notes.
 - [x] `I7-02` Скачать APK во внутренний cache, проверить опубликованный SHA-256 и передать системному installer.
 - [x] `I7-03` Проверять package name и совместимость подписи; не обещать silent install.
-- [x] `I7-04` Удалять незавершённые APK и diagnostic temp-файлы при следующем запуске.
+- [x] `I7-04` Удалять скачанные/незавершённые APK после install handoff, отмены, ошибки и при следующем запуске; diagnostic temp-файлы — при следующем запуске.
 - [x] `I7-05` Никогда не скачивать core отдельно: libbox обновляется только вместе с APK.
 - [x] `I7-06` Настроить release workflow: exact core SHA → CLI/AAR → tests → APK → checksum → metadata.
 - [ ] `I7-07` Хранить signing secrets только в GitHub Secrets; сделать зашифрованную офлайн-копию ключа и инструкции восстановления.
@@ -387,9 +387,10 @@ service/core/TUN. Probe receiver существует только в debug sour
 - [x] `I7-09` Проверить same-key upgrade с предыдущей версией и сохранение профилей/DataStore.
 - [x] `I7-10` Публиковать отдельные `arm64-v8a`, `armeabi-v7a`, `x86_64` APK без чужих native-библиотек; updater выбирает первый совместимый ABI устройства.
 
-Updater запускается только кнопкой и не имеет scheduler/service. Stable использует latest
-не-prerelease, Beta — самый новый опубликованный stable или prerelease. Release считается
-валидным только при единственном `release-metadata-v2.json`, полной матрице одно-ABI APK и отдельных
+Updater проверяет выбранный канал один раз на запуск процесса и по кнопке, не имеет
+scheduler/service и не выполняет периодический polling. Stable использует самый новый
+не-prerelease, Beta — самый новый prerelease независимо от имени тега. Release считается
+валидным при единственном поддерживаемом metadata-файле, полной матрице одно-ABI APK и отдельных
 `APK.sha256`; metadata, checksum и GitHub asset digest обязаны совпасть. Переходный schema-1
 `release-metadata.json` указывает на arm64 APK для уже установленных старых клиентов. Разрешены только
 HTTPS-хосты GitHub с ограниченными redirect/размером/таймаутом.

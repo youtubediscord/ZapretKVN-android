@@ -8,6 +8,7 @@ import io.github.zapretkvn.android.ui.UpdateChannel
 import java.io.File
 import java.io.FileInputStream
 import java.security.MessageDigest
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -37,6 +38,7 @@ class UpdateController(
     val state: StateFlow<UpdateState> = mutableState.asStateFlow()
     private var operation: Job? = null
     private var readyFile: File? = null
+    private val automaticCheckStarted = AtomicBoolean(false)
 
     init {
         cleanupStaleFiles()
@@ -62,6 +64,11 @@ class UpdateController(
                 mutableState.value = UpdateState.Failure("Не удалось проверить обновления.")
             }
         }
+    }
+
+    /** Runs at most once per app process; no worker, alarm or periodic polling is created. */
+    fun checkOnce(channel: UpdateChannel) {
+        if (automaticCheckStarted.compareAndSet(false, true)) check(channel)
     }
 
     fun download() {

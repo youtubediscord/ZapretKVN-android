@@ -137,13 +137,15 @@ class GitHubUpdateSource(
     }
 
     override fun latest(channel: UpdateChannel): UpdateCandidate {
-        val endpoint = when (channel) {
-            UpdateChannel.Stable -> "https://api.github.com/repos/$repository/releases/latest"
-            UpdateChannel.Beta -> "https://api.github.com/repos/$repository/releases?per_page=10"
-        }
+        val endpoint = "https://api.github.com/repos/$repository/releases?per_page=20"
         val releases = UpdateJson.releases(http.readText(endpoint, MAX_RELEASE_JSON_BYTES))
             .filterNot(GitHubRelease::draft)
-            .filter { channel == UpdateChannel.Beta || !it.prerelease }
+            .filter { release ->
+                when (channel) {
+                    UpdateChannel.Stable -> !release.prerelease
+                    UpdateChannel.Beta -> release.prerelease
+                }
+            }
         if (releases.isEmpty()) throw UpdateException("В выбранном канале нет GitHub Releases.")
 
         return candidate(releases.first())

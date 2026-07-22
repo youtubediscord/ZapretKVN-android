@@ -17,6 +17,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.LaunchedEffect
 import androidx.core.content.ContextCompat
 import androidx.core.content.IntentCompat
 import androidx.core.net.toUri
@@ -94,6 +95,9 @@ class MainActivity : ComponentActivity() {
             val vpnMessage by vpnController.message.collectAsState()
             val updateState by updateController.state.collectAsState()
             val systemDark = isSystemInDarkTheme()
+            LaunchedEffect(state.initialized) {
+                if (state.initialized) updateController.checkOnce(state.settings.updateChannel)
+            }
             val darkTheme = when (state.settings.themeMode) {
                 ThemeMode.System -> systemDark
                 ThemeMode.Light -> false

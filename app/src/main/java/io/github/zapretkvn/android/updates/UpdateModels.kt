@@ -20,6 +20,7 @@ data class GitHubAsset(
 data class GitHubRelease(
     val tag: String,
     val title: String,
+    val body: String,
     val pageUrl: String,
     val draft: Boolean,
     val prerelease: Boolean,
@@ -178,6 +179,7 @@ object UpdateJson {
         return GitHubRelease(
             tag = root.requiredString("tag_name"),
             title = root.string("name")?.takeIf(String::isNotBlank) ?: root.requiredString("tag_name"),
+            body = root.string("body").orEmpty().take(MAX_RELEASE_NOTES_CHARS),
             pageUrl = root.requiredString("html_url"),
             draft = root.requiredBoolean("draft"),
             prerelease = root.requiredBoolean("prerelease"),
@@ -222,4 +224,5 @@ object UpdateJson {
     private val COMMIT = Regex("[0-9a-f]{40}")
     private val SHA256 = Regex("[0-9a-f]{64}")
     private val CHECKSUM_LINE = Regex("([0-9A-Fa-f]{64})[ \\t]+([*]?[A-Za-z0-9._-]+\\.apk)")
+    private const val MAX_RELEASE_NOTES_CHARS = 12_000
 }

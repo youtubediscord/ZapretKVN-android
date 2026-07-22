@@ -80,6 +80,7 @@ import io.github.zapretkvn.android.profiles.ProfilesUiState
 import io.github.zapretkvn.android.profiles.ProfilesViewModel
 import io.github.zapretkvn.android.routing.RoutingUiState
 import io.github.zapretkvn.android.routing.RoutingViewModel
+import io.github.zapretkvn.android.updates.UpdateCandidate
 import io.github.zapretkvn.android.updates.UpdateState
 import io.github.zapretkvn.android.vpn.AppScopeMode
 import io.github.zapretkvn.android.vpn.AppsUiState
@@ -132,6 +133,7 @@ fun ZapretApp(
 ) {
     var appPickerOpen by rememberSaveable { mutableStateOf(false) }
     var selectedTab by rememberSaveable { mutableStateOf(AppTab.Home) }
+    var dismissedUpdateTag by rememberSaveable { mutableStateOf<String?>(null) }
     val homeSelected = state.editor == null && !appPickerOpen && selectedTab == AppTab.Home
     DisposableEffect(homeSelected) {
         onHomeSelected(homeSelected)
@@ -168,6 +170,25 @@ fun ZapretApp(
             snackbarHostState.showSnackbar(it)
             routingViewModel.consumeMessage()
         }
+    }
+    LaunchedEffect(updateState) {
+        if (updateState == UpdateState.Idle || updateState is UpdateState.Checking) {
+            dismissedUpdateTag = null
+        }
+    }
+    val availableUpdate = (updateState as? UpdateState.Available)?.candidate
+    if (availableUpdate != null && dismissedUpdateTag != availableUpdate.release.tag) {
+        UpdateAvailableDialog(
+            candidate = availableUpdate,
+            onDownload = {
+                dismissedUpdateTag = availableUpdate.release.tag
+                onDownloadUpdate()
+            },
+            onLater = {
+                dismissedUpdateTag = availableUpdate.release.tag
+                onCancelUpdate()
+            },
+        )
     }
     LaunchedEffect(
         state.importCompletion,
@@ -269,6 +290,42 @@ fun ZapretApp(
             )
         }
     }
+}
+
+@Composable
+internal fun UpdateAvailableDialog(
+    candidate: UpdateCandidate,
+    onDownload: () -> Unit,
+    onLater: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onLater,
+        title = { Text("Доступно обновление ${candidate.metadata.versionName}") },
+        text = {
+            Column(
+                modifier = Modifier
+                    .heightIn(max = 360.dp)
+                    .verticalScroll(rememberScrollState())
+                    .testTag("update-release-notes"),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text("Изменения", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    candidate.release.body.ifBlank {
+                        "Автор релиза не добавил список изменений."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+        },
+        confirmButton = {
+            Button(onClick = onDownload) { Text("Скачать") }
+        },
+        dismissButton = {
+            TextButton(onClick = onLater) { Text("Позже") }
+        },
+        modifier = Modifier.testTag("update-available-dialog"),
+    )
 }
 
 @Composable

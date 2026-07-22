@@ -41,6 +41,7 @@ class UpdateJsonTest {
         val release = UpdateJson.releases(RELEASE).single()
 
         assertEquals("v1.2.3", release.tag)
+        assertEquals("Fixed updater", release.body)
         assertEquals(false, release.draft)
         assertEquals(true, release.prerelease)
         assertEquals("sha256:$SHA", release.assets[1].digest)
@@ -75,6 +76,7 @@ class UpdateJsonTest {
             {
               "tag_name":"v1.2.3",
               "name":"Beta 1.2.3",
+              "body":"Fixed updater",
               "html_url":"https://github.com/ZapretKVN/ZapretKVN/releases/tag/v1.2.3",
               "draft":false,
               "prerelease":true,

@@ -21,6 +21,36 @@ class UpdateControllerInstrumentedTest {
     private val context = ApplicationProvider.getApplicationContext<android.content.Context>()
 
     @Test
+    fun automaticCheckRunsOnlyOncePerProcessController() = runBlocking {
+        val bytes = "verified apk fixture".toByteArray()
+        val candidate = candidate(bytes)
+        var checks = 0
+        val controller = UpdateController(
+            context = context,
+            repository = "ZapretKVN/ZapretKVN",
+            currentVersionName = "1.0.0",
+            currentVersionCode = 1,
+            source = UpdateReleaseSource {
+                checks++
+                candidate
+            },
+            http = object : UpdateHttpClient {
+                override fun readText(url: String, maxBytes: Int): String = error("not used")
+                override fun download(url: String, target: File, expectedBytes: Long, onProgress: (Long) -> Unit) =
+                    error("not used")
+            },
+            verifier = ApkUpdateVerifier { _, _ -> },
+        )
+
+        controller.checkOnce(UpdateChannel.Beta)
+        controller.checkOnce(UpdateChannel.Beta)
+        withTimeout(5_000) { controller.state.first { it is UpdateState.Available } }
+
+        assertEquals(1, checks)
+        controller.cancelAndDelete()
+    }
+
+    @Test
     fun manualCheckDownloadIntentAndCancelUseOnlyUpdateCache() = runBlocking {
         val bytes = "verified apk fixture".toByteArray()
         val candidate = candidate(bytes)
@@ -197,7 +227,15 @@ class UpdateControllerInstrumentedTest {
         )
         val apk = GitHubAsset(name, "https://github.com/ZapretKVN/ZapretKVN/apk", bytes.size.toLong(), "sha256:$sha")
         return UpdateCandidate(
-            release = GitHubRelease("v1.1.0", "1.1.0", "https://github.com/release", false, false, emptyList()),
+            release = GitHubRelease(
+                "v1.1.0",
+                "1.1.0",
+                "Changes",
+                "https://github.com/release",
+                false,
+                false,
+                emptyList(),
+            ),
             metadata = metadata,
             apkAsset = apk,
             checksumAsset = GitHubAsset("$name.sha256", "https://github.com/sha", 100, null),

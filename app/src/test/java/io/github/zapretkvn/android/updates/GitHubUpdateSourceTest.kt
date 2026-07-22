@@ -10,7 +10,7 @@ class GitHubUpdateSourceTest {
     @Test
     fun `stable release requires metadata apk and two agreeing digests`() {
         val http = FakeHttp()
-        http.text[LATEST] = release(prerelease = false)
+        http.text[LIST] = "[${release(prerelease = false)}]"
         http.text[METADATA_URL] = metadata(SHA)
         http.text[CHECKSUM_URL] = "$SHA  $APK"
 
@@ -22,10 +22,9 @@ class GitHubUpdateSourceTest {
     }
 
     @Test
-    fun `beta accepts prerelease while stable and checksum mismatch fail closed`() {
+    fun `beta selects prerelease and ignores normal releases`() {
         val betaHttp = FakeHttp().apply {
-            text[LIST] = "[${release(prerelease = true)}]"
-            text[LATEST] = release(prerelease = true)
+            text[LIST] = "[${release(prerelease = false).replace("v1.2.3", "v9.9.9")},${release(prerelease = true)}]"
             text[METADATA_URL] = metadata(SHA)
             text[CHECKSUM_URL] = "$SHA  $APK"
         }
@@ -34,11 +33,6 @@ class GitHubUpdateSourceTest {
             GitHubUpdateSource(REPOSITORY, APPLICATION_ID, betaHttp, listOf("arm64-v8a"))
                 .latest(UpdateChannel.Beta).release.tag,
         )
-        assertThrows(UpdateException::class.java) {
-            GitHubUpdateSource(REPOSITORY, APPLICATION_ID, betaHttp, listOf("arm64-v8a"))
-                .latest(UpdateChannel.Stable)
-        }
-
         betaHttp.text[CHECKSUM_URL] = "${"f".repeat(64)}  $APK"
         assertThrows(UpdateException::class.java) {
             GitHubUpdateSource(REPOSITORY, APPLICATION_ID, betaHttp, listOf("arm64-v8a"))
@@ -47,9 +41,28 @@ class GitHubUpdateSourceTest {
     }
 
     @Test
+    fun `channels fail when only the opposite release kind exists`() {
+        val onlyStable = FakeHttp().apply {
+            text[LIST] = "[${release(prerelease = false)}]"
+        }
+        val onlyBeta = FakeHttp().apply {
+            text[LIST] = "[${release(prerelease = true)}]"
+        }
+
+        assertThrows(UpdateException::class.java) {
+            GitHubUpdateSource(REPOSITORY, APPLICATION_ID, onlyStable, listOf("arm64-v8a"))
+                .latest(UpdateChannel.Beta)
+        }
+        assertThrows(UpdateException::class.java) {
+            GitHubUpdateSource(REPOSITORY, APPLICATION_ID, onlyBeta, listOf("arm64-v8a"))
+                .latest(UpdateChannel.Stable)
+        }
+    }
+
+    @Test
     fun `matrix metadata selects the first device-supported ABI only`() {
         val http = FakeHttp().apply {
-            text[LATEST] = matrixRelease()
+            text[LIST] = "[${matrixRelease()}]"
             text[MATRIX_METADATA_URL] = matrixMetadata()
             text[V7_CHECKSUM_URL] = "$SHA  $V7_APK"
         }
@@ -87,8 +100,7 @@ class GitHubUpdateSourceTest {
     private companion object {
         const val REPOSITORY = "ZapretKVN/ZapretKVN"
         const val APPLICATION_ID = "io.github.zapretkvn.android"
-        const val LATEST = "https://api.github.com/repos/$REPOSITORY/releases/latest"
-        const val LIST = "https://api.github.com/repos/$REPOSITORY/releases?per_page=10"
+        const val LIST = "https://api.github.com/repos/$REPOSITORY/releases?per_page=20"
         const val METADATA_URL = "https://github.com/ZapretKVN/ZapretKVN/releases/download/v1.2.3/release-metadata.json"
         const val CHECKSUM_URL = "https://github.com/ZapretKVN/ZapretKVN/releases/download/v1.2.3/app.sha256"
         const val APK_URL = "https://github.com/ZapretKVN/ZapretKVN/releases/download/v1.2.3/app"

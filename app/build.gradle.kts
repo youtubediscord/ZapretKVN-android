@@ -22,6 +22,9 @@ val appVersionName = providers.gradleProperty("zapretVersionName")
     .orElse(providers.environmentVariable("ZAPRET_VERSION_NAME"))
     .orElse("0.2.0")
     .get()
+val debugVersionNameSuffix = providers.gradleProperty("zapretDebugVersionNameSuffix")
+    .orElse("-debug")
+    .get()
 val updateRepository = providers.gradleProperty("zapretUpdateRepository")
     .orElse(providers.environmentVariable("ZAPRET_UPDATE_REPOSITORY"))
     .orElse("youtubediscord/ZapretKVN-android")
@@ -98,7 +101,9 @@ android {
     buildTypes {
         debug {
             applicationIdSuffix = ".debug"
-            versionNameSuffix = "-debug"
+            if (debugVersionNameSuffix.isNotEmpty()) {
+                versionNameSuffix = debugVersionNameSuffix
+            }
             if (requestedApkAbi == null) {
                 ndk {
                     // CI and the default local Android test target use an x86_64 AVD.

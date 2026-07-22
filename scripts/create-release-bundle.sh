@@ -157,7 +157,7 @@ jq -n \
         '- Managed DNS перехватывает TCP/UDP 53, но не встроенный DoH, DoT или mDNS; FakeIP выключен.' \
         '- Domain-only block не является firewall: для гарантии нужен IP/CIDR rule-set.' \
         '- Clash YAML и Hysteria v1 URI пока не импортируются; raw JSON остаётся ответственностью пользователя.' \
-        '- Подписки, core и APK обновляются только вручную; silent install и фоновая синхронизация отсутствуют.' \
+        '- APK проверяется один раз при запуске; загрузка и системная установка требуют подтверждения, silent install недоступен. Подписки не обновляются в фоне, core обновляется только вместе с APK.' \
         '- При неработающем proxy/DNS VPN закрывается без бесконечного retry и plaintext DNS fallback.'
 } > "$OUTPUT_DIR/RELEASE_NOTES.md"
 

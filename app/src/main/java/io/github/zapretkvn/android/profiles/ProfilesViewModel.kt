@@ -76,6 +76,7 @@ data class ProfilesUiState(
     val importPreview: ImportPreviewState? = null,
     val importCompletion: ImportCompletion? = null,
     val refreshableProfileIds: Set<String> = emptySet(),
+    val initialized: Boolean = false,
 )
 
 data class ImportCompletion(
@@ -128,7 +129,9 @@ class ProfilesViewModel(
                 combine(store.profiles, settingsStore.settings) { profiles, settings ->
                     profiles to settings
                 }.collect { (profiles, settings) ->
-                    mutableState.update { it.copy(profiles = profiles, settings = settings) }
+                    mutableState.update {
+                        it.copy(profiles = profiles, settings = settings, initialized = true)
+                    }
                     if (settings.activeProfileId != null && profiles.none { it.id == settings.activeProfileId }) {
                         settingsStore.setActiveProfile(null)
                     }
