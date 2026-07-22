@@ -588,9 +588,10 @@ arm64 RC и незавершённая физическая матрица из 
 - [x] Beta 23 опубликована из commit `6be23f4`, но проверка живого GitHub API показала, что старый updater сортирует `test.*` выше более нового `beta.*`; release и tag сохранены для аудита.
 - [x] Test 23 опубликован из commit `f602c19` для arm64-v8a, armeabi-v7a и x86_64 с versionCode `200123`, тем же debug signer, SHA-256 и updater metadata. Он дополнительно сортирует prerelease по `published_at` и находится первым для Test 21/22.
 - [x] Диагностика Test 23 доказала более широкий дефект pinned Android WireGuard: handshake и первый UDP DNS успешны, но TCP SYN/data-plane зависает; «Из JSON» давал ложный успех через direct IPv6. Android data-plane заменён без второго TUN на pinned vanilla/AWG движки metacubex, а WireGuard startup теперь синхронно проверяет выбранный concrete outbound через три bounded TCP/TLS endpoint.
+- [x] Test 24 опубликован из commit `ba395b4` для arm64-v8a, armeabi-v7a и x86_64 с versionCode `200124`, тем же debug signer, SHA-256, updater metadata и точными версиями vanilla WireGuard/AmneziaWG data-plane модулей; физическая проверка новой архитектуры остаётся открытой.
 - [ ] Idle CPU/battery release-gate выполнен на физических устройствах.
 
-**Следующее действие:** собрать и установить следующий prerelease и на том же WireGuard-профиле проверить
+**Следующее действие:** установить Test 24 и на том же WireGuard-профиле проверить
 «Из JSON», DNS Android, Auto и Secure. В effective overlay должны быть
 `wireguard_android_engine_count=1`, отсутствие сгенерированного compatibility detour,
 IPv4 default allowed и точный inner MTU. Стадия `wireguard_data_plane` должна либо
