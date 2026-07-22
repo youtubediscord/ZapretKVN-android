@@ -24,6 +24,7 @@ data class RuntimeConfigOptions(
     val proxyIpv4Only: Boolean = true,
     val bootstrapHost: BootstrapHostOverlay? = null,
     val vpnHiding: VpnHidingOptions = VpnHidingOptions(),
+    val updaterPackageName: String? = null,
 )
 
 sealed interface RuntimeConfigResult {
@@ -109,6 +110,12 @@ object RuntimeConfigBuilder {
         if (options.dnsMode in PROXY_DNS_MODES && selectedProxyTag == null) {
             return invalid("Для управляемого DNS нужен выбранный proxy/selector outbound.")
         }
+        if (options.updaterPackageName != null && selectedProxyTag == null) {
+            return invalid("Для временного VPN-маршрута updater нужен выбранный proxy/selector outbound.")
+        }
+        if (options.updaterPackageName != null && !ANDROID_PACKAGE.matches(options.updaterPackageName)) {
+            return invalid("Некорректный Android package временного updater-маршрута.")
+        }
         if (options.dnsMode in MANAGED_DNS_MODES && hasFakeIp(root)) {
             return invalid("FakeIP найден в JSON. Для него выберите режим «Из JSON».")
         }
@@ -142,8 +149,15 @@ object RuntimeConfigBuilder {
                     this["experimental"] = runtimeExperimental(this["experimental"])
                 }
             }
+        val updaterRoot = options.updaterPackageName?.let { packageName ->
+            applyUpdaterRoute(
+                root = JsonObject(runtimeRoot),
+                packageName = packageName,
+                proxyTag = checkNotNull(selectedProxyTag),
+            )
+        } ?: JsonObject(runtimeRoot)
         val dnsOverlay = applyDnsOverlay(
-            root = JsonObject(runtimeRoot),
+            root = updaterRoot,
             mode = options.dnsMode,
             proxyIpv4Only = options.proxyIpv4Only,
             selectedProxyTag = selectedProxyTag,
@@ -176,6 +190,29 @@ object RuntimeConfigBuilder {
         })
         if (!changed) return root
         return JsonObject(root.toMutableMap().apply { this["endpoints"] = runtimeEndpoints })
+    }
+
+    /** Adds a process-scoped rule only to the temporary in-memory updater session. */
+    private fun applyUpdaterRoute(
+        root: JsonObject,
+        packageName: String,
+        proxyTag: String,
+    ): JsonObject {
+        val route = checkNotNull(root["route"] as? JsonObject).toMutableMap()
+        val existingRules = (route["rules"] as? JsonArray).orEmpty()
+        route["rules"] = JsonArray(listOf(updaterRouteRule(packageName, proxyTag)) + existingRules)
+        return JsonObject(root.toMutableMap().apply { this["route"] = JsonObject(route) })
+    }
+
+    private fun updaterRouteRule(packageName: String, proxyTag: String): JsonObject = buildJsonObject {
+        put("package_name", JsonArray(listOf(JsonPrimitive(packageName))))
+        put("domain", JsonArray(UPDATER_DOMAINS.map(::JsonPrimitive)))
+        put(
+            "domain_suffix",
+            JsonArray(UPDATER_DOMAIN_SUFFIXES.map(::JsonPrimitive)),
+        )
+        put("action", "route")
+        put("outbound", proxyTag)
     }
 
     private fun applyDnsOverlay(
@@ -536,6 +573,9 @@ object RuntimeConfigBuilder {
     private fun invalid(message: String) = RuntimeConfigResult.Invalid(message)
 
     private val PACKAGE_FIELDS = setOf("include_package", "exclude_package")
+    private val ANDROID_PACKAGE = Regex("[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+")
+    private val UPDATER_DOMAINS = listOf("github.com", "githubusercontent.com")
+    private val UPDATER_DOMAIN_SUFFIXES = listOf(".github.com", ".githubusercontent.com")
     private val ROUTE_EXCLUDE_FIELDS = setOf(
         "route_exclude_address",
         "route_exclude_address_set",
@@ -590,6 +630,7 @@ object RuntimeConfigBuilder {
         "domain_suffix",
         "domain_keyword",
         "domain_regex",
+        "package_name",
         "rule_set",
         "rule_set_ip_cidr_match_source",
         "invert",

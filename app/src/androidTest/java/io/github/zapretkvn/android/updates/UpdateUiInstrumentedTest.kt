@@ -10,7 +10,6 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
 import io.github.zapretkvn.android.MainActivity
 import io.github.zapretkvn.android.ZapretApplication
-import io.github.zapretkvn.android.ui.UpdateChannel
 import io.github.zapretkvn.android.ui.UpdateAvailableDialog
 import io.github.zapretkvn.android.ui.theme.ZapretTheme
 import kotlinx.coroutines.flow.first

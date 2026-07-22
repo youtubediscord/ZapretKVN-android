@@ -26,7 +26,7 @@ import io.github.zapretkvn.android.routing.RuleSetAssetManager
 import io.github.zapretkvn.android.ui.ThemeMode
 import io.github.zapretkvn.android.ui.UiSettings
 import io.github.zapretkvn.android.ui.UiSettingsStore
-import io.github.zapretkvn.android.ui.UpdateChannel
+import io.github.zapretkvn.android.updates.UpdateChannel
 import io.github.zapretkvn.android.vpn.VpnController
 import io.github.zapretkvn.android.vpn.BootstrapCache
 import io.github.zapretkvn.android.vpn.VpnConnectionState

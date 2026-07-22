@@ -25,11 +25,16 @@ class RuntimeConfigNativeInstrumentedTest {
             }
         """.trimIndent()
         DnsMode.entries.forEach { mode ->
-            val runtime = RuntimeConfigBuilder.build(
-                raw,
-                options = RuntimeConfigOptions(dnsMode = mode),
-            ) as RuntimeConfigResult.Ready
-            Libbox.checkConfig(runtime.json)
+            listOf(null, "io.github.zapretkvn.android").forEach { updaterPackage ->
+                val runtime = RuntimeConfigBuilder.build(
+                    raw,
+                    options = RuntimeConfigOptions(
+                        dnsMode = mode,
+                        updaterPackageName = updaterPackage,
+                    ),
+                ) as RuntimeConfigResult.Ready
+                Libbox.checkConfig(runtime.json)
+            }
         }
     }
 }

@@ -157,6 +157,43 @@ class RuntimeConfigBuilderTest {
     }
 
     @Test
+    fun `updater route is temporary package scoped and uses selected proxy`() {
+        val stored = validConfig()
+        val normal = RuntimeConfigBuilder.build(stored) as RuntimeConfigResult.Ready
+        val temporary = RuntimeConfigBuilder.build(
+            stored,
+            options = RuntimeConfigOptions(
+                dnsMode = DnsMode.Automatic,
+                updaterPackageName = "io.github.zapretkvn.android",
+            ),
+        ) as RuntimeConfigResult.Ready
+        val normalRoot = JsonConfig.parse(normal.json) as JsonObject
+        val normalRules = ((normalRoot["route"] as JsonObject)["rules"] as? JsonArray).orEmpty()
+            .map { it as JsonObject }
+        val temporaryRoot = JsonConfig.parse(temporary.json) as JsonObject
+        val temporaryRules = ((temporaryRoot["route"] as JsonObject)["rules"] as JsonArray)
+            .map { it as JsonObject }
+        val updaterRule = temporaryRules.first { "package_name" in it }
+        val dnsRules = (((temporaryRoot["dns"] as JsonObject)["rules"] as JsonArray))
+            .map { it as JsonObject }
+
+        assertFalse(normalRules.any { "package_name" in it })
+        assertEquals(
+            "io.github.zapretkvn.android",
+            ((updaterRule["package_name"] as JsonArray).single() as JsonPrimitive).content,
+        )
+        assertTrue(updaterRule["domain_suffix"].toString().contains("githubusercontent.com"))
+        assertEquals("zapret-proxy", updaterRule.string("outbound"))
+        assertTrue(
+            dnsRules.any { rule ->
+                rule.string("server") == "zapret-secure-dns" &&
+                    rule["package_name"] == updaterRule["package_name"]
+            },
+        )
+        assertFalse("stored profile must stay untouched", "github" in stored)
+    }
+
+    @Test
     fun `zero and two tun inbounds are rejected`() {
         val zero = validConfig().replace(
             """"inbounds":[{"type":"tun","tag":"tun-in","address":["172.19.0.1/30","fdfe:dcba:9876::1/126"],"auto_route":true}]""",

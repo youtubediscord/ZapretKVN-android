@@ -15,6 +15,8 @@ import io.github.zapretkvn.android.routing.RuleSetAssetManager
 import io.github.zapretkvn.android.routing.RoutingViewModel
 import io.github.zapretkvn.android.ui.UiSettingsStore
 import io.github.zapretkvn.android.updates.UpdateController
+import io.github.zapretkvn.android.updates.AppUpdateVpnFallback
+import io.github.zapretkvn.android.updates.AndroidUpdateInstallIntentFactory
 import io.github.zapretkvn.android.vpn.AndroidPackageAvailability
 import io.github.zapretkvn.android.vpn.AppCatalog
 import io.github.zapretkvn.android.vpn.AppSelectionStore
@@ -64,6 +66,8 @@ class AppContainer(
         repository = BuildConfig.UPDATE_REPOSITORY,
         currentVersionName = BuildConfig.VERSION_NAME,
         currentVersionCode = BuildConfig.VERSION_CODE.toLong(),
+        vpnFallback = AppUpdateVpnFallback(appContext, uiSettingsStore, vpnController),
+        installIntentFactory = AndroidUpdateInstallIntentFactory(appContext),
     )
     val bootstrapCache = BootstrapCache(File(appContext.noBackupFilesDir, "network"))
     val ruleSetAssetManager = RuleSetAssetManager(appContext)

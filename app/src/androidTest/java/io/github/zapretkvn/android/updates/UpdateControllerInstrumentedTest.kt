@@ -3,7 +3,6 @@ package io.github.zapretkvn.android.updates
 import android.content.Intent
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import io.github.zapretkvn.android.ui.UpdateChannel
 import java.io.File
 import java.security.MessageDigest
 import kotlinx.coroutines.flow.first
@@ -19,6 +18,40 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class UpdateControllerInstrumentedTest {
     private val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+
+    @Test
+    fun retryableCheckUsesOneTemporaryVpnSessionAndRestoresIt() = runBlocking {
+        val bytes = "verified apk fixture".toByteArray()
+        val candidate = candidate(bytes)
+        var attempts = 0
+        var connected = 0
+        var restored = 0
+        val controller = UpdateController(
+            context = context,
+            repository = "ZapretKVN/ZapretKVN",
+            currentVersionName = "1.0.0",
+            currentVersionCode = 1,
+            source = UpdateReleaseSource {
+                attempts++
+                if (attempts == 1) {
+                    throw UpdateException("GitHub недоступен.", retryViaVpn = true)
+                }
+                candidate
+            },
+            vpnFallback = UpdateVpnFallback {
+                connected++
+                UpdateVpnSession { restored++ }
+            },
+        )
+
+        controller.check(UpdateChannel.Beta)
+        withTimeout(5_000) { controller.state.first { it is UpdateState.Available } }
+
+        assertEquals(2, attempts)
+        assertEquals(1, connected)
+        assertEquals(1, restored)
+        controller.cancelAndDelete()
+    }
 
     @Test
     fun automaticCheckRunsOnlyOncePerProcessController() = runBlocking {
@@ -194,6 +227,7 @@ class UpdateControllerInstrumentedTest {
         repository = "ZapretKVN/ZapretKVN",
         currentVersionName = "1.0.0",
         currentVersionCode = 1,
+        installIntentFactory = AndroidUpdateInstallIntentFactory(context),
         source = UpdateReleaseSource { candidate },
         http = object : UpdateHttpClient {
             override fun readText(url: String, maxBytes: Int): String = error("not used")

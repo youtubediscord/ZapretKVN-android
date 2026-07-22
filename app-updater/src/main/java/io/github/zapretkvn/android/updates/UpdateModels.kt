@@ -1,7 +1,7 @@
 package io.github.zapretkvn.android.updates
 
-import io.github.zapretkvn.android.config.JsonConfig
 import java.util.Locale
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -46,9 +46,23 @@ data class UpdateCandidate(
     val checksumAsset: GitHubAsset,
 )
 
+enum class UpdateChannel {
+    Stable,
+    Beta,
+}
+
+enum class UpdateOperation {
+    Check,
+    Download,
+}
+
 sealed interface UpdateState {
     data object Idle : UpdateState
     data class Checking(val channel: String) : UpdateState
+    data class RetryingViaVpn(
+        val operation: UpdateOperation,
+        val candidate: UpdateCandidate? = null,
+    ) : UpdateState
     data class UpToDate(val checkedTag: String, val currentVersion: String) : UpdateState
     data class Available(val candidate: UpdateCandidate) : UpdateState
     data class Downloading(
@@ -60,19 +74,35 @@ sealed interface UpdateState {
     data class Failure(val message: String, val candidate: UpdateCandidate? = null) : UpdateState
 }
 
-class UpdateException(message: String, cause: Throwable? = null) : Exception(message, cause)
+class UpdateException(
+    message: String,
+    cause: Throwable? = null,
+    val retryViaVpn: Boolean = false,
+) : Exception(message, cause)
 
 object UpdateJson {
+    private val json = Json {
+        explicitNulls = true
+        isLenient = false
+    }
+
     fun releases(raw: String): List<GitHubRelease> {
         val element = try {
-            JsonConfig.parse(raw)
+            json.parseToJsonElement(raw)
         } catch (error: Exception) {
-            throw UpdateException("GitHub вернул некорректный JSON.", error)
+            throw UpdateException(
+                "GitHub вернул некорректный JSON.",
+                cause = error,
+                retryViaVpn = true,
+            )
         }
         val objects = when (element) {
             is JsonObject -> listOf(element)
             is JsonArray -> element.mapNotNull { it as? JsonObject }
-            else -> throw UpdateException("GitHub вернул неожиданный формат release.")
+            else -> throw UpdateException(
+                "GitHub вернул неожиданный формат release.",
+                retryViaVpn = true,
+            )
         }
         return objects.map(::release)
     }
@@ -82,12 +112,19 @@ object UpdateJson {
         supportedAbis: List<String> = listOf("arm64-v8a"),
     ): ReleaseMetadata {
         val root = try {
-            JsonConfig.parse(raw) as? JsonObject
-                ?: throw UpdateException("release-metadata.json должен быть объектом.")
+            json.parseToJsonElement(raw) as? JsonObject
+                ?: throw UpdateException(
+                    "release-metadata.json должен быть объектом.",
+                    retryViaVpn = true,
+                )
         } catch (error: UpdateException) {
             throw error
         } catch (error: Exception) {
-            throw UpdateException("release-metadata.json повреждён.", error)
+            throw UpdateException(
+                "release-metadata.json повреждён.",
+                cause = error,
+                retryViaVpn = true,
+            )
         }
         val artifact = when (root.requiredInt("schema")) {
             1 -> legacyArtifact(root, supportedAbis)

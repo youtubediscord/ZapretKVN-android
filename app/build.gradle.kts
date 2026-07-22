@@ -158,6 +158,7 @@ dependencies {
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation(files(libboxAar))
+    implementation(project(":app-updater"))
     implementation(project(":network-bootstrap"))
     implementation(project(":wireguard-import"))
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.10.0")

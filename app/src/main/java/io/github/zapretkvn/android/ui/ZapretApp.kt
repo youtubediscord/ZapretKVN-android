@@ -81,6 +81,7 @@ import io.github.zapretkvn.android.profiles.ProfilesViewModel
 import io.github.zapretkvn.android.routing.RoutingUiState
 import io.github.zapretkvn.android.routing.RoutingViewModel
 import io.github.zapretkvn.android.updates.UpdateCandidate
+import io.github.zapretkvn.android.updates.UpdateChannel
 import io.github.zapretkvn.android.updates.UpdateState
 import io.github.zapretkvn.android.vpn.AppScopeMode
 import io.github.zapretkvn.android.vpn.AppsUiState

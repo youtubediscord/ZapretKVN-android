@@ -1,10 +1,7 @@
 package io.github.zapretkvn.android.updates
 
-import android.content.ClipData
 import android.content.Context
 import android.content.Intent
-import androidx.core.content.FileProvider
-import io.github.zapretkvn.android.ui.UpdateChannel
 import java.io.File
 import java.io.FileInputStream
 import java.security.MessageDigest
@@ -13,6 +10,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -20,6 +18,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.withContext
 import kotlin.coroutines.coroutineContext
 
 class UpdateController(
@@ -30,6 +29,10 @@ class UpdateController(
     private val source: UpdateReleaseSource = GitHubUpdateSource(repository, context.packageName),
     private val http: UpdateHttpClient = GitHubHttpsClient(),
     private val verifier: ApkUpdateVerifier = AndroidApkUpdateVerifier(context),
+    private val vpnFallback: UpdateVpnFallback? = null,
+    private val installIntentFactory: UpdateInstallIntentFactory = UpdateInstallIntentFactory {
+        throw UpdateException("Фабрика системной установки не настроена.")
+    },
 ) {
     private val appContext = context.applicationContext
     private val root = File(appContext.cacheDir, "updates")
@@ -49,7 +52,9 @@ class UpdateController(
             cleanupFiles()
             mutableState.value = UpdateState.Checking(channel.name)
             try {
-                val candidate = source.latest(channel)
+                val candidate = withVpnRetry(UpdateOperation.Check) {
+                    source.latest(channel)
+                }
                 coroutineContext.ensureActive()
                 mutableState.value = if (candidate.metadata.versionCode > currentVersionCode) {
                     UpdateState.Available(candidate)
@@ -85,21 +90,25 @@ class UpdateController(
             var lastPublishedAt = 0L
             try {
                 val downloadJob = coroutineContext[Job]
-                mutableState.value = UpdateState.Downloading(candidate, 0, candidate.metadata.apkSize)
-                http.download(
-                    candidate.apkAsset.downloadUrl,
-                    partial,
-                    candidate.metadata.apkSize,
-                ) { downloaded ->
-                    downloadJob?.ensureActive()
-                    val now = System.nanoTime()
-                    if (downloaded == candidate.metadata.apkSize || now - lastPublishedAt >= 250_000_000L) {
-                        lastPublishedAt = now
-                        mutableState.value = UpdateState.Downloading(
-                            candidate,
-                            downloaded,
-                            candidate.metadata.apkSize,
-                        )
+                withVpnRetry(UpdateOperation.Download, candidate) {
+                    partial.delete()
+                    lastPublishedAt = 0L
+                    mutableState.value = UpdateState.Downloading(candidate, 0, candidate.metadata.apkSize)
+                    http.download(
+                        candidate.apkAsset.downloadUrl,
+                        partial,
+                        candidate.metadata.apkSize,
+                    ) { downloaded ->
+                        downloadJob?.ensureActive()
+                        val now = System.nanoTime()
+                        if (downloaded == candidate.metadata.apkSize || now - lastPublishedAt >= 250_000_000L) {
+                            lastPublishedAt = now
+                            mutableState.value = UpdateState.Downloading(
+                                candidate,
+                                downloaded,
+                                candidate.metadata.apkSize,
+                            )
+                        }
                     }
                 }
                 coroutineContext.ensureActive()
@@ -137,21 +146,10 @@ class UpdateController(
         }
     }
 
-    @Suppress("DEPRECATION")
     fun createInstallIntent(): Intent {
         val file = readyFile?.takeIf(File::isFile)
             ?: throw UpdateException("Проверенный APK больше недоступен.")
-        val uri = FileProvider.getUriForFile(
-            appContext,
-            "${appContext.packageName}.fileprovider",
-            file,
-        )
-        return Intent(Intent.ACTION_INSTALL_PACKAGE).apply {
-            setDataAndType(uri, APK_MIME)
-            clipData = ClipData.newRawUri("Zapret KVN update", uri)
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            putExtra(Intent.EXTRA_RETURN_RESULT, true)
-        }
+        return installIntentFactory.create(file)
     }
 
     fun onInstallerFinished(installed: Boolean) {
@@ -179,6 +177,45 @@ class UpdateController(
         operation = scope.launch { block() }
     }
 
+    private suspend fun <T> withVpnRetry(
+        operation: UpdateOperation,
+        candidate: UpdateCandidate? = null,
+        block: () -> T,
+    ): T {
+        val directFailure = try {
+            return block()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: UpdateException) {
+            if (!error.retryViaVpn || vpnFallback == null) throw error
+            error
+        }
+        mutableState.value = UpdateState.RetryingViaVpn(operation, candidate)
+        val vpnSession = try {
+            vpnFallback.connect()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: UpdateException) {
+            throw vpnUnavailable(directFailure, error.message)
+        } catch (_: Throwable) {
+            throw vpnUnavailable(directFailure, null)
+        }
+        return try {
+            block()
+        } finally {
+            withContext(NonCancellable) { vpnSession.close() }
+        }
+    }
+
+    private fun vpnUnavailable(directFailure: UpdateException, detail: String?): UpdateException {
+        val fallback = detail?.takeIf(String::isNotBlank)
+            ?: "временный VPN-маршрут недоступен"
+        return UpdateException(
+            "${directFailure.message.orEmpty()} VPN-повтор не выполнен: $fallback",
+            directFailure,
+        )
+    }
+
     private fun cleanupFiles() {
         readyFile = null
         root.listFiles()?.forEach { file ->
@@ -198,9 +235,5 @@ class UpdateController(
             }
         }
         return digest.digest().joinToString("") { "%02x".format(it) }
-    }
-
-    private companion object {
-        const val APK_MIME = "application/vnd.android.package-archive"
     }
 }

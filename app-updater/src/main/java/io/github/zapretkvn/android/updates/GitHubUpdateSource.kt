@@ -1,9 +1,9 @@
 package io.github.zapretkvn.android.updates
 
 import android.os.Build
-import io.github.zapretkvn.android.ui.UpdateChannel
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.IOException
 import java.net.URI
 import java.net.URL
 import javax.net.ssl.HttpsURLConnection
@@ -20,7 +20,9 @@ fun interface UpdateReleaseSource {
 class GitHubHttpsClient : UpdateHttpClient {
     override fun readText(url: String, maxBytes: Int): String = request(url) { connection ->
         val declared = connection.contentLengthLong
-        if (declared > maxBytes) throw UpdateException("Ответ GitHub слишком большой.")
+        if (declared > maxBytes) {
+            throw UpdateException("Ответ GitHub слишком большой.", retryViaVpn = true)
+        }
         connection.inputStream.use { input ->
             val output = ByteArrayOutputStream()
             val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
@@ -29,7 +31,9 @@ class GitHubHttpsClient : UpdateHttpClient {
                 val count = input.read(buffer)
                 if (count < 0) break
                 total += count
-                if (total > maxBytes) throw UpdateException("Ответ GitHub слишком большой.")
+                if (total > maxBytes) {
+                    throw UpdateException("Ответ GitHub слишком большой.", retryViaVpn = true)
+                }
                 output.write(buffer, 0, count)
             }
             output.toString(Charsets.UTF_8.name())
@@ -47,7 +51,10 @@ class GitHubHttpsClient : UpdateHttpClient {
         }
         val declared = connection.contentLengthLong
         if (declared > 0 && declared != expectedBytes) {
-            throw UpdateException("Размер APK не совпадает с GitHub release.")
+            throw UpdateException(
+                "Размер ответа не совпадает с GitHub release.",
+                retryViaVpn = true,
+            )
         }
         target.outputStream().buffered().use { output ->
             connection.inputStream.use { input ->
@@ -58,13 +65,18 @@ class GitHubHttpsClient : UpdateHttpClient {
                     if (count < 0) break
                     total += count
                     if (total > expectedBytes || total > UpdateJson.MAX_APK_BYTES) {
-                        throw UpdateException("Загруженный APK больше опубликованного размера.")
+                        throw UpdateException(
+                            "Ответ больше опубликованного размера APK.",
+                            retryViaVpn = true,
+                        )
                     }
                     output.write(buffer, 0, count)
                     onProgress(total)
                 }
                 output.flush()
-                if (total != expectedBytes) throw UpdateException("Загрузка APK прервана.")
+                if (total != expectedBytes) {
+                    throw UpdateException("Загрузка APK прервана.", retryViaVpn = true)
+                }
             }
         }
     }
@@ -91,10 +103,25 @@ class GitHubHttpsClient : UpdateHttpClient {
                         return@repeat
                     }
                     in 200..299 -> return block(connection)
-                    403 -> throw UpdateException("GitHub временно ограничил число проверок. Повторите позже.")
+                    403, 429, 451 -> throw UpdateException(
+                        "Прямой доступ к GitHub отклонён (HTTP $status).",
+                        retryViaVpn = true,
+                    )
                     404 -> throw UpdateException("GitHub Release пока не опубликован.")
+                    in 500..599 -> throw UpdateException(
+                        "GitHub временно недоступен (HTTP $status).",
+                        retryViaVpn = true,
+                    )
                     else -> throw UpdateException("GitHub вернул HTTP $status.")
                 }
+            } catch (error: UpdateException) {
+                throw error
+            } catch (error: IOException) {
+                throw UpdateException(
+                    "Не удалось связаться с GitHub.",
+                    cause = error,
+                    retryViaVpn = true,
+                )
             } finally {
                 connection.disconnect()
             }

@@ -19,7 +19,7 @@ import io.github.zapretkvn.android.MainActivity
 import io.github.zapretkvn.android.ZapretApplication
 import io.github.zapretkvn.android.config.DnsMode
 import io.github.zapretkvn.android.hardening.TunMtuMode
-import io.github.zapretkvn.android.ui.UpdateChannel
+import io.github.zapretkvn.android.updates.UpdateChannel
 import io.github.zapretkvn.android.vpn.VpnConnectionState
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking

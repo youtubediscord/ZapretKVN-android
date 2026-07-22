@@ -389,6 +389,7 @@ service/core/TUN. Probe receiver существует только в debug sour
 - [x] `I7-08` Публиковать release notes с app version, core tag, full core SHA, ABI и checksum.
 - [x] `I7-09` Проверить same-key upgrade с предыдущей версией и сохранение профилей/DataStore.
 - [x] `I7-10` Публиковать отдельные `arm64-v8a`, `armeabi-v7a`, `x86_64` APK без чужих native-библиотек; updater выбирает первый совместимый ABI устройства.
+- [x] `I7-11` Вынести updater в направленный `app-updater` library-модуль. После retryable сетевой ошибки один раз повторять текущую проверку или загрузку через временный VPN runtime overlay, ограниченный package приложения и GitHub-хостами; после операции восстанавливать предыдущее состояние VPN.
 
 Updater проверяет выбранный канал один раз на запуск процесса и по кнопке, не имеет
 scheduler/service и не выполняет периодический polling. Stable использует самый новый
@@ -397,6 +398,14 @@ scheduler/service и не выполняет периодический polling.
 `APK.sha256`; metadata, checksum и GitHub asset digest обязаны совпасть. Переходный schema-1
 `release-metadata.json` указывает на arm64 APK для уже установленных старых клиентов. Разрешены только
 HTTPS-хосты GitHub с ограниченными redirect/размером/таймаутом.
+
+`app-updater` не зависит от UI, профилей, libbox или VPN lifecycle. Интеграционный callback
+в `app` включается только после сетевой ошибки/HTTP 403, 429, 451 или 5xx. Если VPN уже
+работает, сервис выполняет контролируемый restart с временным `package_name + domain_suffix`
+правилом; если VPN был выключен и consent уже выдан, временно запускается активный профиль.
+После запроса исходное состояние восстанавливается в `finally`, включая отмену. Правило не
+записывается в профиль и не влияет на GitHub-трафик других приложений. Без consent или
+активного профиля updater показывает обычную ошибку с причиной недоступности VPN-повтора.
 
 После загрузки Android читает сам APK: package должен совпасть с установленным, versionCode
 должен быть строго больше, versionName/versionCode — совпасть с metadata, minSdk — подходить,

@@ -1,11 +1,11 @@
 package io.github.zapretkvn.android.updates
 
 import android.content.Context
+import android.annotation.TargetApi
 import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
 import android.content.pm.SigningInfo
 import android.os.Build
-import androidx.annotation.RequiresApi
 import java.io.File
 import java.security.MessageDigest
 
@@ -111,7 +111,7 @@ class AndroidApkUpdateVerifier(private val context: Context) : ApkUpdateVerifier
         )
     }
 
-    @RequiresApi(28)
+    @TargetApi(28)
     private fun signingIdentity(value: SigningInfo): SigningIdentity {
         val current = value.apkContentsSigners.orEmpty().map(::certificateSha256).toSet()
         val multipleSigners = value.hasMultipleSigners()

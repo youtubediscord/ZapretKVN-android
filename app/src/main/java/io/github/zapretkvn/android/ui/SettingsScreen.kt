@@ -59,6 +59,8 @@ import io.github.zapretkvn.android.diagnostics.DiagnosticStageStatus
 import io.github.zapretkvn.android.hardening.TunMtuMode
 import io.github.zapretkvn.android.profiles.ProfilesUiState
 import io.github.zapretkvn.android.profiles.ProfilesViewModel
+import io.github.zapretkvn.android.updates.UpdateChannel
+import io.github.zapretkvn.android.updates.UpdateOperation
 import io.github.zapretkvn.android.updates.UpdateState
 import io.github.zapretkvn.android.vpn.VpnConnectionState
 import kotlinx.coroutines.CancellationException
@@ -334,6 +336,19 @@ private fun UpdateControls(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 CircularProgressIndicator(modifier = Modifier.padding(end = 12.dp))
                 Text("Проверка канала ${state.channel}…")
+            }
+            OutlinedButton(onClick = onCancel) { Text("Отмена") }
+        }
+
+        is UpdateState.RetryingViaVpn -> {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                CircularProgressIndicator(modifier = Modifier.padding(end = 12.dp))
+                Text(
+                    when (state.operation) {
+                        UpdateOperation.Check -> "GitHub недоступен напрямую. Временно включаем VPN для проверки…"
+                        UpdateOperation.Download -> "Загрузка заблокирована. Временно включаем VPN для updater…"
+                    },
+                )
             }
             OutlinedButton(onClick = onCancel) { Text("Отмена") }
         }

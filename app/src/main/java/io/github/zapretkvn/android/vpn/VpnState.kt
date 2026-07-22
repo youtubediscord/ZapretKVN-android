@@ -2,11 +2,16 @@ package io.github.zapretkvn.android.vpn
 
 sealed interface VpnConnectionState {
     data object Stopped : VpnConnectionState
-    data class Starting(val profileId: String, val message: String) : VpnConnectionState
+    data class Starting(
+        val profileId: String,
+        val message: String,
+        val updaterRouting: Boolean = false,
+    ) : VpnConnectionState
     data class Connected(
         val profileId: String,
         val profileName: String,
         val connectedAtEpochMillis: Long,
+        val updaterRouting: Boolean = false,
     ) : VpnConnectionState
     data class Stopping(val profileId: String?) : VpnConnectionState
     data class Error(

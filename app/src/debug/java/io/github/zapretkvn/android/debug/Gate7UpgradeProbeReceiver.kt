@@ -8,7 +8,7 @@ import io.github.zapretkvn.android.ZapretApplication
 import io.github.zapretkvn.android.config.DnsMode
 import io.github.zapretkvn.android.profiles.ProfileSource
 import io.github.zapretkvn.android.ui.ThemeMode
-import io.github.zapretkvn.android.ui.UpdateChannel
+import io.github.zapretkvn.android.updates.UpdateChannel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob

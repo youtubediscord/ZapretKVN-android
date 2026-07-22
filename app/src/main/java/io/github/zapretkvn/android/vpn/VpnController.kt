@@ -80,6 +80,14 @@ class VpnController(
         )
     }
 
+    fun startForUpdater(profileId: String) {
+        require(profileId.isNotBlank()) { "Профиль не выбран." }
+        ContextCompat.startForegroundService(
+            context,
+            ZapretVpnService.startIntent(context, profileId, updaterRouting = true),
+        )
+    }
+
     fun stop() {
         ContextCompat.startForegroundService(context, ZapretVpnService.stopIntent(context))
     }
@@ -89,6 +97,19 @@ class VpnController(
         ContextCompat.startForegroundService(
             context,
             ZapretVpnService.restartIntent(context, connected.profileId, reason),
+        )
+    }
+
+    fun restartUpdaterRouting(profileId: String, enabled: Boolean) {
+        require(profileId.isNotBlank()) { "Профиль не выбран." }
+        ContextCompat.startForegroundService(
+            context,
+            ZapretVpnService.restartIntent(
+                context = context,
+                profileId = profileId,
+                reason = if (enabled) "Временный маршрут updater" else "Завершение маршрута updater",
+                updaterRouting = enabled,
+            ),
         )
     }
 

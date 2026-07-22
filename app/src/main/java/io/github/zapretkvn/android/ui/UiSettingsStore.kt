@@ -11,6 +11,7 @@ import androidx.datastore.preferences.preferencesDataStore
 import io.github.zapretkvn.android.config.DnsMode
 import io.github.zapretkvn.android.hardening.TunMtuMode
 import io.github.zapretkvn.android.hardening.VpnHidingOptions
+import io.github.zapretkvn.android.updates.UpdateChannel
 import java.io.IOException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
@@ -20,11 +21,6 @@ enum class ThemeMode {
     System,
     Light,
     Dark,
-}
-
-enum class UpdateChannel {
-    Stable,
-    Beta,
 }
 
 data class UiSettings(

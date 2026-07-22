@@ -115,7 +115,11 @@ class ZapretVpnService : VpnService() {
         when (intent?.action) {
             ACTION_START -> {
                 val profileId = intent.getStringExtra(EXTRA_PROFILE_ID).orEmpty()
-                requestStart(profileId, startId)
+                requestStart(
+                    profileId = profileId,
+                    startId = startId,
+                    updaterRouting = intent.getBooleanExtra(EXTRA_UPDATER_ROUTING, false),
+                )
             }
             ACTION_SELECT -> requestSelect(
                 profileId = intent.getStringExtra(EXTRA_PROFILE_ID).orEmpty(),
@@ -128,6 +132,8 @@ class ZapretVpnService : VpnService() {
                 reason = intent.getStringExtra(EXTRA_REASON).orEmpty().ifBlank { "Перезапуск VPN" },
                 startId = startId,
                 noCacheLookup = false,
+                updaterRouting = intent.takeIf { it.hasExtra(EXTRA_UPDATER_ROUTING) }
+                    ?.getBooleanExtra(EXTRA_UPDATER_ROUTING, false),
             )
             ACTION_CLEAR_DNS_CACHE -> requestClearDnsCache(startId)
             ACTION_PING -> requestPing(startId)
@@ -182,12 +188,15 @@ class ZapretVpnService : VpnService() {
         super.onDestroy()
     }
 
-    private fun requestStart(profileId: String, startId: Int) {
+    private fun requestStart(profileId: String, startId: Int, updaterRouting: Boolean) {
         val token = controller.nextGeneration()
         terminalError = false
         controller.beginConnectionDiagnostic(token, "user_start")
         controller.startConnectionDiagnosticStage(token, "profile", "Профиль и область приложений")
-        controller.publish(token, VpnConnectionState.Starting(profileId, "Проверка профиля"))
+        controller.publish(
+            token,
+            VpnConnectionState.Starting(profileId, "Проверка профиля", updaterRouting),
+        )
         showForeground(ForegroundNotificationState.ValidatingProfile)
         serviceScope.launch {
             serviceLock.withLock {
@@ -195,7 +204,7 @@ class ZapretVpnService : VpnService() {
                 activeSession = null
                 if (token != controller.currentGeneration()) return@withLock
                 try {
-                    startWithDeadline(token, profileId)
+                    startWithDeadline(token, profileId, updaterRouting = updaterRouting)
                 } catch (error: Throwable) {
                     if (token == controller.currentGeneration()) {
                         failLocked(token, error, startId)
@@ -209,6 +218,7 @@ class ZapretVpnService : VpnService() {
         token: Long,
         profileId: String,
         noCacheLookup: Boolean = false,
+        updaterRouting: Boolean = false,
     ) {
         require(profileId.isNotBlank()) { "Профиль не выбран." }
         val systemPolicy = VpnSystemPolicyDetector.detect(this)
@@ -262,7 +272,10 @@ class ZapretVpnService : VpnService() {
         }
 
         controller.startConnectionDiagnosticStage(token, "android_network", "Сеть и политика Android")
-        controller.publish(token, VpnConnectionState.Starting(profileId, "Проверка сети Android"))
+        controller.publish(
+            token,
+            VpnConnectionState.Starting(profileId, "Проверка сети Android", updaterRouting),
+        )
         showForeground(ForegroundNotificationState.CheckingNetwork)
         val networkMonitor = DefaultNetworkMonitor(this).also(DefaultNetworkMonitor::start)
         controller.startConnectionDiagnosticStage(token, "bootstrap", "Bootstrap DNS и доступность сервера")
@@ -313,6 +326,7 @@ class ZapretVpnService : VpnService() {
                         proxyIpv4Only = uiSettings.proxyIpv4Only,
                         bootstrapHost = preparedBootstrap.overlay,
                         vpnHiding = vpnHiding,
+                        updaterPackageName = packageName.takeIf { updaterRouting },
                     ),
                 )
             ) {
@@ -328,7 +342,10 @@ class ZapretVpnService : VpnService() {
             EffectiveOverlaySummary.create(runtimeJson, dnsMode),
         )
         controller.startConnectionDiagnosticStage(token, "check_config", "Проверка конфигурации ядром")
-        controller.publish(token, VpnConnectionState.Starting(profileId, "Проверка sing-box"))
+        controller.publish(
+            token,
+            VpnConnectionState.Starting(profileId, "Проверка sing-box", updaterRouting),
+        )
         showForeground(ForegroundNotificationState.ValidatingCore)
         try {
             Libbox.checkConfig(runtimeJson)
@@ -339,7 +356,10 @@ class ZapretVpnService : VpnService() {
         }
 
         controller.startConnectionDiagnosticStage(token, "platform_adapter", "Подготовка Android VPN adapter")
-        controller.publish(token, VpnConnectionState.Starting(profileId, "Создание TUN"))
+        controller.publish(
+            token,
+            VpnConnectionState.Starting(profileId, "Создание TUN", updaterRouting),
+        )
         showForeground(ForegroundNotificationState.CreatingTun)
         val resources = ActiveSession(
             profileId = profileId,
@@ -349,6 +369,7 @@ class ZapretVpnService : VpnService() {
             networkPolicyKey = underlying.policyKey(),
             outboundDescriptions = ConfigAnalyzer.outboundDescriptions(profile.json),
             selectorGroups = ConfigAnalyzer.selectorGroups(profile.json),
+            updaterRouting = updaterRouting,
             controller = controller,
         )
         try {
@@ -398,7 +419,10 @@ class ZapretVpnService : VpnService() {
             // remain diagnosable. It is closed after health unless Diagnostics is visible.
             controller.startConnectionDiagnosticStage(token, "core_log", "Снимок bounded core-лога")
             resources.openLogClient(controller)
-            controller.publish(token, VpnConnectionState.Starting(profileId, "Проверка DNS и HTTPS"))
+            controller.publish(
+                token,
+                VpnConnectionState.Starting(profileId, "Проверка DNS и HTTPS", updaterRouting),
+            )
             showForeground(ForegroundNotificationState.CheckingHealth)
             val dnsServer = resources.platform?.internalDnsServer
                 ?: error("libbox не передал внутренний DNS TUN.")
@@ -438,6 +462,7 @@ class ZapretVpnService : VpnService() {
                     profileId = profileId,
                     profileName = profile.metadata.name,
                     connectedAtEpochMillis = System.currentTimeMillis(),
+                    updaterRouting = updaterRouting,
                 ),
             )
             startHomeStatusObserver(resources)
@@ -456,9 +481,10 @@ class ZapretVpnService : VpnService() {
         token: Long,
         profileId: String,
         noCacheLookup: Boolean = false,
+        updaterRouting: Boolean = false,
     ) {
         val completed = withTimeoutOrNull(CONNECTION_START_TIMEOUT_MILLIS) {
-            startLocked(token, profileId, noCacheLookup)
+            startLocked(token, profileId, noCacheLookup, updaterRouting)
             true
         } == true
         if (!completed) throw ConnectionStartupTimeoutException()
@@ -469,12 +495,14 @@ class ZapretVpnService : VpnService() {
         reason: String,
         startId: Int,
         noCacheLookup: Boolean,
+        updaterRouting: Boolean? = null,
     ) {
         val token = controller.nextGeneration()
         serviceScope.launch {
             serviceLock.withLock {
                 if (token != controller.currentGeneration()) return@withLock
                 val targetProfile = activeSession?.profileId ?: profileId
+                val targetUpdaterRouting = updaterRouting ?: activeSession?.updaterRouting ?: false
                 if (targetProfile.isBlank()) {
                     controller.publishMessage("VPN выключен; перезапуск не требуется.")
                     finishForeground()
@@ -488,12 +516,20 @@ class ZapretVpnService : VpnService() {
                     "profile",
                     "Профиль и область приложений",
                 )
-                controller.publish(token, VpnConnectionState.Starting(targetProfile, reason))
+                controller.publish(
+                    token,
+                    VpnConnectionState.Starting(targetProfile, reason, targetUpdaterRouting),
+                )
                 showForeground(ForegroundNotificationState.Restarting)
                 activeSession?.close()
                 activeSession = null
                 try {
-                    startWithDeadline(token, targetProfile, noCacheLookup)
+                    startWithDeadline(
+                        token,
+                        targetProfile,
+                        noCacheLookup,
+                        updaterRouting = targetUpdaterRouting,
+                    )
                 } catch (error: Throwable) {
                     if (token == controller.currentGeneration()) failLocked(token, error, startId)
                 }
@@ -628,13 +664,21 @@ class ZapretVpnService : VpnService() {
                     )
                     controller.publish(
                         restartToken,
-                        VpnConnectionState.Starting(profileId, "Перезапуск после смены сервера"),
+                        VpnConnectionState.Starting(
+                            profileId,
+                            "Перезапуск после смены сервера",
+                            session.updaterRouting,
+                        ),
                     )
                     showForeground(ForegroundNotificationState.Restarting)
                     activeSession?.close()
                     activeSession = null
                     try {
-                        startWithDeadline(restartToken, profileId)
+                        startWithDeadline(
+                            restartToken,
+                            profileId,
+                            updaterRouting = session.updaterRouting,
+                        )
                     } catch (restartError: Throwable) {
                         if (restartToken == controller.currentGeneration()) {
                             restartError.addSuppressed(runtimeSwitchError)
@@ -900,6 +944,7 @@ class ZapretVpnService : VpnService() {
         val networkPolicyKey: UnderlyingPolicyKey,
         val outboundDescriptions: Map<String, OutboundDescription>,
         selectorGroups: List<SelectorGroup>,
+        val updaterRouting: Boolean,
         private val controller: VpnController,
     ) : AutoCloseable {
         private val closed = AtomicBoolean(false)
@@ -1178,16 +1223,22 @@ class ZapretVpnService : VpnService() {
         private const val EXTRA_GROUP_TAG = "group_tag"
         private const val EXTRA_OUTBOUND_TAG = "outbound_tag"
         private const val EXTRA_REASON = "reason"
+        private const val EXTRA_UPDATER_ROUTING = "updater_routing"
         private const val NOTIFICATION_CHANNEL_ID = "vpn"
         private const val NOTIFICATION_ID = 1001
         private const val NETWORK_RESTART_DEBOUNCE_MILLIS = 750L
         private const val CONNECTION_START_TIMEOUT_MILLIS = 30_000L
         private val NEW_LINES = Regex("[\\r\\n\\t]+")
 
-        fun startIntent(context: Context, profileId: String): Intent =
+        fun startIntent(
+            context: Context,
+            profileId: String,
+            updaterRouting: Boolean = false,
+        ): Intent =
             Intent(context, ZapretVpnService::class.java)
                 .setAction(ACTION_START)
                 .putExtra(EXTRA_PROFILE_ID, profileId)
+                .putExtra(EXTRA_UPDATER_ROUTING, updaterRouting)
 
         fun stopIntent(context: Context): Intent =
             Intent(context, ZapretVpnService::class.java).setAction(ACTION_STOP)
@@ -1203,11 +1254,19 @@ class ZapretVpnService : VpnService() {
             .putExtra(EXTRA_GROUP_TAG, groupTag)
             .putExtra(EXTRA_OUTBOUND_TAG, outboundTag)
 
-        fun restartIntent(context: Context, profileId: String, reason: String): Intent =
+        fun restartIntent(
+            context: Context,
+            profileId: String,
+            reason: String,
+            updaterRouting: Boolean? = null,
+        ): Intent =
             Intent(context, ZapretVpnService::class.java)
                 .setAction(ACTION_RESTART)
                 .putExtra(EXTRA_PROFILE_ID, profileId)
                 .putExtra(EXTRA_REASON, reason)
+                .apply {
+                    updaterRouting?.let { putExtra(EXTRA_UPDATER_ROUTING, it) }
+                }
 
         fun clearDnsCacheIntent(context: Context): Intent =
             Intent(context, ZapretVpnService::class.java).setAction(ACTION_CLEAR_DNS_CACHE)

@@ -74,16 +74,17 @@ if grep -Eq 'WAKE_LOCK|REQUEST_IGNORE_BATTERY_OPTIMIZATIONS|android:process=' "$
 fi
 
 if grep -R -E 'import android\.util\.Log|\bLog\.[vdiewtf]\(|printStackTrace\(|System\.(out|err)' \
-    "$PROJECT_ROOT/app/src/main/java"; then
+    "$PROJECT_ROOT/app/src/main/java" "$PROJECT_ROOT/app-updater/src/main/java"; then
     echo "Production source must not write credentials or runtime details to Logcat/stdout" >&2
     exit 1
 fi
-if grep -R -E 'addPrimaryClipChangedListener|setPrimaryClip\(' "$PROJECT_ROOT/app/src/main/java"; then
+if grep -R -E 'addPrimaryClipChangedListener|setPrimaryClip\(' \
+    "$PROJECT_ROOT/app/src/main/java" "$PROJECT_ROOT/app-updater/src/main/java"; then
     echo "Application clipboard history/listeners are forbidden; clipboard import is read-on-action only" >&2
     exit 1
 fi
 if grep -R -E 'android\.os\.PowerManager|android\.app\.AlarmManager|android\.app\.job\.JobScheduler|androidx\.work|ScheduledExecutorService|scheduleAtFixedRate|scheduleWithFixedDelay' \
-    "$PROJECT_ROOT/app/src/main/java"; then
+    "$PROJECT_ROOT/app/src/main/java" "$PROJECT_ROOT/app-updater/src/main/java"; then
     echo "Production source contains an app-owned wake/alarm/job/periodic scheduler" >&2
     exit 1
 fi
@@ -98,7 +99,11 @@ import sys
 
 root = Path(sys.argv[1])
 delays = []
-for source in (root / "app/src/main/java", root / "network-bootstrap/src/main/java"):
+for source in (
+    root / "app/src/main/java",
+    root / "app-updater/src/main/java",
+    root / "network-bootstrap/src/main/java",
+):
     for path in source.rglob("*.kt"):
         count = path.read_text().count("delay(")
         if count:

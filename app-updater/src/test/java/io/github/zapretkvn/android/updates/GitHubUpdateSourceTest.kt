@@ -1,6 +1,5 @@
 package io.github.zapretkvn.android.updates
 
-import io.github.zapretkvn.android.ui.UpdateChannel
 import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows

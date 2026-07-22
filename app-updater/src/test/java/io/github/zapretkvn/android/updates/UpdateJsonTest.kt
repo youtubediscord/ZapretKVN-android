@@ -2,6 +2,7 @@ package io.github.zapretkvn.android.updates
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class UpdateJsonTest {
@@ -60,6 +61,15 @@ class UpdateJsonTest {
         assertEquals(false, release.draft)
         assertEquals(true, release.prerelease)
         assertEquals("sha256:$SHA", release.assets[1].digest)
+    }
+
+    @Test
+    fun `blocked html response permits one vpn retry`() {
+        val error = assertThrows(UpdateException::class.java) {
+            UpdateJson.releases("<html>blocked</html>")
+        }
+
+        assertTrue(error.retryViaVpn)
     }
 
     private companion object {
