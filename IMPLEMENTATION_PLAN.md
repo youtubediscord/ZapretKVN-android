@@ -585,9 +585,11 @@ arm64 RC и незавершённая физическая матрица из 
 - [x] Test 21 собран локально из commit `d78ad72` для arm64-v8a, armeabi-v7a и x86_64 и опубликован с новой цепочкой Auto DNS, SHA-256 и metadata; физическая проверка остаётся открытой.
 - [x] Test 22 собран локально из commit `479a480` для arm64-v8a, armeabi-v7a и x86_64 и опубликован с Markdown-оформлением release notes, SHA-256 и metadata.
 - [x] По отчётам Test 21 подтверждён Android WireGuard GRO/standard-bind сбой: handshake и первый DNS проходят, затем return data зависает. Runtime-only direct detour переводит endpoint без явного `detour` на `ClientBind`; health-route теперь обязателен во всех DNS-режимах, а профиль без DNS получает минимальный Android fallback. Exact pinned CLI и JVM regression tests проходят; физическая проверка остаётся открытой.
+- [x] Beta 23 опубликована из commit `6be23f4`, но проверка живого GitHub API показала, что старый updater сортирует `test.*` выше более нового `beta.*`; release и tag сохранены для аудита.
+- [x] Test 23 опубликован из commit `f602c19` для arm64-v8a, armeabi-v7a и x86_64 с versionCode `200123`, тем же debug signer, SHA-256 и updater metadata. Он дополнительно сортирует prerelease по `published_at` и находится первым для Test 21/22.
 - [ ] Idle CPU/battery release-gate выполнен на физических устройствах.
 
-**Следующее действие:** установить следующий Test 23 и на том же WireGuard-профиле проверить
+**Следующее действие:** установить Test 23 через Beta updater или GitHub Release и на том же WireGuard-профиле проверить
 «Из JSON», DNS Android, Auto и Secure. В effective overlay должны быть
 `wireguard_client_bind_detour_count=1`, IPv4 default allowed и точный inner MTU; Auto больше
 не имеет права завершиться через прямой IPv6 health-path. На VLESS «Из JSON» профиль без
