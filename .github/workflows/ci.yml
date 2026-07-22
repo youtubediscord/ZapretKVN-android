@@ -57,7 +57,32 @@ jobs:
       - name: Set up Gradle cache
         uses: gradle/actions/setup-gradle@0b6dd653ba04f4f93bf581ec31e66cbd7dcb644d # v4
 
+      - name: Set up native core artifact cache
+        id: core-artifacts
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: |
+            app/libs/libbox.aar
+            app/libs/libbox.properties
+            core-build/output
+          key: native-core-artifacts-${{ runner.os }}-${{ runner.arch }}-v1-${{ hashFiles('core.properties', 'scripts/build-core.sh', 'scripts/build-native-symbols.sh', 'scripts/verify-core-cache.sh', 'scripts/verify-core-version.sh', 'scripts/verify-fixtures.sh', 'audit/core/**', 'testdata/**', 'app/src/main/assets/rule-sets/**', 'app/src/main/res/raw/sing_box_extended_license.txt') }}
+
+      - name: Set up native core toolchain cache
+        if: steps.core-artifacts.outputs.cache-hit != 'true'
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: |
+            ~/.cache/go-build
+            core-build/gopath/bin
+            core-build/gopath/pkg/mod
+            core-build/source
+          key: native-core-toolchain-${{ runner.os }}-${{ runner.arch }}-v1-${{ hashFiles('core.properties') }}
+          restore-keys: |
+            native-core-toolchain-${{ runner.os }}-${{ runner.arch }}-v1-
+
       - name: Verify, test and build
+        env:
+          ZAPRET_CORE_CACHE_HIT: ${{ steps.core-artifacts.outputs.cache-hit }}
         run: scripts/ci-build.sh
 
       - name: Run opt-in Android performance matrix

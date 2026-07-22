@@ -21,8 +21,12 @@ fi
 
 cd "$PROJECT_ROOT"
 scripts/verify-project.sh
-scripts/build-core.sh
-scripts/build-native-symbols.sh
+if [[ "${ZAPRET_CORE_CACHE_HIT:-false}" == true ]]; then
+    scripts/verify-core-cache.sh
+else
+    scripts/build-core.sh
+    scripts/build-native-symbols.sh
+fi
 scripts/verify-rule-sets.sh
 (
     cd core-build/output
