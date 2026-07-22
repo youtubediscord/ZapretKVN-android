@@ -256,6 +256,19 @@ class ImportParserTest {
         )
     }
 
+    @Test
+    fun `vless xhttp without extra uses required core padding default`() {
+        val candidate = ImportParser.parse(
+            "vless://11111111-1111-4111-8111-111111111111@xhttp.example:443" +
+                "?security=tls&type=xhttp&mode=stream-up&path=%2Fapi#XHTTP",
+            ProfileSource.Clipboard,
+        ) as ImportCandidate.Managed
+        val transport = candidate.servers.single().outbound["transport"] as JsonObject
+
+        assertEquals("xhttp", transport.string("type"))
+        assertEquals("100-1000", transport.string("x_padding_bytes"))
+    }
+
     @Test(timeout = 5_000L)
     fun `parser rejects arbitrary bounded input without non-domain failures`() {
         val random = Random(0x5A17)

@@ -250,6 +250,7 @@ object ProtocolOutboundBuilders {
             }
             "grpc" -> serviceName?.takeIf(String::isNotBlank)?.let { put("service_name", it) }
             "xhttp" -> {
+                put("x_padding_bytes", "100-1000")
                 mode?.takeIf(String::isNotBlank)?.let { put("mode", it) }
                 path?.takeIf(String::isNotBlank)?.let { put("path", it) }
                 host?.takeIf(String::isNotBlank)?.let { put("host", it) }
