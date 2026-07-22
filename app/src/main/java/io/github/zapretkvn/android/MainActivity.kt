@@ -5,6 +5,7 @@ import android.app.Activity
 import android.content.pm.PackageManager
 import android.content.ActivityNotFoundException
 import android.content.Intent
+import android.net.Uri
 import android.provider.Settings
 import android.os.Build
 import android.os.Bundle
@@ -17,6 +18,7 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.collectAsState
 import androidx.core.content.ContextCompat
+import androidx.core.content.IntentCompat
 import androidx.core.net.toUri
 import io.github.zapretkvn.android.profiles.ProfilesViewModel
 import io.github.zapretkvn.android.routing.RoutingViewModel
@@ -167,9 +169,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun handleExternalImport(intent: Intent) {
-        if (intent.action != Intent.ACTION_VIEW) return
-        val uri = intent.data ?: return
-        if (uri.scheme !in setOf("content", "file", "android.resource")) return
+        val uri = intent.externalImportUri() ?: return
         profilesViewModel.importDocument(uri)
     }
 
@@ -232,4 +232,19 @@ class MainActivity : ComponentActivity() {
             updateController.failInstallation(error.message ?: "Не удалось открыть системную установку.")
         }
     }
+}
+
+private fun Intent.externalImportUri(): Uri? {
+    if (action != Intent.ACTION_VIEW && action != Intent.ACTION_SEND) return null
+    val streamUri = IntentCompat.getParcelableExtra(this, Intent.EXTRA_STREAM, Uri::class.java)
+    val clipUri = clipData
+        ?.takeIf { it.itemCount == 1 }
+        ?.getItemAt(0)
+        ?.uri
+    val uri = if (action == Intent.ACTION_VIEW) {
+        data ?: streamUri ?: clipUri
+    } else {
+        streamUri ?: clipUri ?: data
+    }
+    return uri?.takeIf { it.scheme in setOf("content", "file", "android.resource") }
 }

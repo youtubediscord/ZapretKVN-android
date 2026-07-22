@@ -59,6 +59,18 @@
                 <data android:mimeType="text/plain" />
                 <data android:mimeType="application/octet-stream" />
             </intent-filter>
+
+            <!-- Messengers may share an unopened attachment as EXTRA_STREAM instead of VIEW data. -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+
+                <category android:name="android.intent.category.DEFAULT" />
+
+                <data android:mimeType="application/x-wireguard-profile" />
+                <data android:mimeType="application/x-amneziawg-profile" />
+                <data android:mimeType="text/plain" />
+                <data android:mimeType="application/octet-stream" />
+            </intent-filter>
         </activity>
 
         <activity

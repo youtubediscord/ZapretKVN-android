@@ -102,6 +102,37 @@ class ImportInstrumentedTest {
     }
 
     @Test
+    fun wireguardConfSharedAsTelegramStyleStreamReachesValidatedPreview() {
+        val testContext = InstrumentationRegistry.getInstrumentation().context
+        val resourceId = testContext.resources.getIdentifier(
+            "wireguard_profile",
+            "raw",
+            testContext.packageName,
+        )
+        val uri = Uri.parse("android.resource://${testContext.packageName}/$resourceId")
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            setClass(context, MainActivity::class.java)
+            type = "application/octet-stream"
+            putExtra(Intent.EXTRA_STREAM, uri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        var viewModel: ProfilesViewModel? = null
+
+        ActivityScenario.launch<MainActivity>(intent).use { scenario ->
+            scenario.onActivity { activity ->
+                viewModel = ViewModelProvider(activity)[ProfilesViewModel::class.java]
+            }
+            val deadline = SystemClock.uptimeMillis() + 10_000
+            while (viewModel?.state?.value?.importPreview == null && SystemClock.uptimeMillis() < deadline) {
+                SystemClock.sleep(25)
+            }
+            val preview = checkNotNull(viewModel?.state?.value?.importPreview)
+            assertEquals(1, preview.serverCount)
+            assertTrue(preview.candidate is ImportCandidate.WireGuard)
+        }
+    }
+
+    @Test
     fun clipboardIsReadOnlyAfterExplicitReaderCall() {
         var imported = ""
         val canary = "clipboard-r8-${UUID.randomUUID()}"
