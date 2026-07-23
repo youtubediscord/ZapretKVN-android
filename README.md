@@ -8,11 +8,11 @@ Zapret KVN — быстрый и бережный Android-клиент для `s
 
 По умолчанию выбранные приложения используют режим «Россия напрямую»: российские домены и IP, а также LAN идут через прямую сеть Android, остальное — через VPN. Так VPN-сервер не тратит ресурсы на доступные без обхода сайты.
 
-> **Первый stable `0.2.1` опубликован.** Физическая матрица слабых устройств,
+> **Stable `0.2.2` опубликован.** Физическая матрица слабых устройств,
 > IPv6/NAT64, операторов и энергии продолжается; целевые 1–2 секунды подключения
 > остаются целью performance-gate, а не обещанием для каждой сети и конфигурации.
 
-[Скачать stable 0.2.1](https://github.com/youtubediscord/ZapretKVN-android/releases/tag/v0.2.1) · [Посмотреть архитектуру](ARCHITECTURE.md) · [Изучить маршрутизацию](ROUTING_ARCHITECTURE.md)
+[Скачать stable 0.2.2](https://github.com/youtubediscord/ZapretKVN-android/releases/tag/v0.2.2) · [Посмотреть архитектуру](ARCHITECTURE.md) · [Изучить маршрутизацию](ROUTING_ARCHITECTURE.md)
 
 ## Минимализм в чистом виде
 
@@ -97,7 +97,7 @@ Android всё равно показывает системный `VpnService`, 
 ## Сборки
 
 Stable-сборки используют package `io.github.zapretkvn.android` и постоянный production
-key. `0.2.1` обновляет `0.2.1-beta.30` без потери app-private данных. Ручные
+key. `0.2.2` обновляет `0.2.1` и `0.2.1-beta.30` без потери app-private данных. Ручные
 debug-сборки публикуются в [GitHub Releases](https://github.com/youtubediscord/ZapretKVN-android/releases)
 как prerelease; у них отдельный package `io.github.zapretkvn.android.debug` и Android
 debug key, поэтому они устанавливаются рядом и не обновляют production-приложение.
