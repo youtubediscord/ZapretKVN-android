@@ -595,6 +595,11 @@ production-signed arm64 APK на реальном устройстве и нез
 - [x] Test 25 опубликован из commit `a1ee9cb` для arm64-v8a, armeabi-v7a и x86_64 с versionCode `200125`, прежним debug signer, новым patch SHA-256, per-APK checksums и updater metadata; Git tag указывает точно на проверенный app commit.
 - [x] Evidence Test 25 исключил MTU как самостоятельную причину видеозависания: одинаковое поведение воспроизводится при внешнем TUN `1500` и profile/core `9000`. Найден общий для raw/WireGuard/VLESS runtime-дефект: exact core без `log.level` выбирает `trace`; теперь runtime всех профилей ограничен `warn` (или более строгим сохранённым уровнем), `log.output` удаляется, а профиль на диске не меняется.
 - [x] Test 26 опубликован из commit `9103ed1` для arm64-v8a, armeabi-v7a и x86_64 с versionCode `200126`, прежним debug signer, per-APK checksums и updater metadata. Он изолированно проверяет новую runtime logging policy при неизменных core и WireGuard data-plane.
+- [x] IPv4-only userspace WireGuard распознаётся по внутренним endpoint addresses.
+  Connect-time HTTPS health-check выбирает IPv4 через resolver VPN `Network`,
+  подключается к числовому адресу с исходными TLS SNI/certificate hostname/HTTP
+  Host и возвращает `VPN-201`, если требуемого семейства нет. Сохранённый JSON не
+  переписывается; неиспользуемые DNS servers только явно предупреждаются.
 - [ ] Idle CPU/battery release-gate выполнен на физических устройствах.
 
 **Следующее действие:** установить [Test 26](https://github.com/youtubediscord/ZapretKVN-android/releases/tag/v0.2.1-test.26) поверх Test 25 и на том же профиле, DNS-режиме и видео сравнить время запуска и буферизацию. В diagnostic JSON runtime должен сохранять только `warn`/ошибки вместо непрерывного `trace`; если видео всё ещё тормозит, выполнить чистый throughput A/B Test 26 ↔ официальная Amnezia без смены сервера. Затем повторить

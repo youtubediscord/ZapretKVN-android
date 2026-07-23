@@ -60,5 +60,40 @@ class BootstrapConfigTest {
         assertEquals(51820, target.port)
         assertFalse(target.tcpPreflightSupported)
         assertFalse(target.staleAddressAllowed)
+        assertEquals(ProxyIpFamily.Ipv4Only, BootstrapConfig.selectedProxyIpFamily(raw))
     }
+
+    @Test
+    fun `wireguard family follows its local tunnel addresses without rewriting profile`() {
+        val ipv4 = wireGuardProfile("""["10.0.0.2/32"]""")
+        val ipv6 = wireGuardProfile("""["fd00::2/128"]""")
+        val dual = wireGuardProfile("""["10.0.0.2/32","fd00::2/128"]""")
+
+        assertEquals(ProxyIpFamily.Ipv4Only, BootstrapConfig.selectedProxyIpFamily(ipv4))
+        assertEquals(ProxyIpFamily.Ipv6Only, BootstrapConfig.selectedProxyIpFamily(ipv6))
+        assertEquals(ProxyIpFamily.DualStack, BootstrapConfig.selectedProxyIpFamily(dual))
+        assertEquals(
+            ProxyIpFamily.Unspecified,
+            BootstrapConfig.selectedProxyIpFamily(
+                """{"outbounds":[{"type":"vless","tag":"p","server":"vpn.example","server_port":443}],"route":{"final":"p"}}""",
+            ),
+        )
+    }
+
+    private fun wireGuardProfile(addresses: String): String = """
+        {
+          "endpoints":[{
+            "type":"wireguard",
+            "tag":"wg",
+            "address":$addresses,
+            "peers":[{
+              "address":"192.0.2.1",
+              "port":51820,
+              "allowed_ips":["0.0.0.0/0","::/0"]
+            }]
+          }],
+          "outbounds":[{"type":"direct","tag":"direct"}],
+          "route":{"rules":[{"ip_cidr":["0.0.0.0/0"],"action":"route","outbound":"wg"}],"final":"direct"}
+        }
+    """.trimIndent()
 }

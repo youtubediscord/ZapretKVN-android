@@ -230,6 +230,11 @@ enum class DiagnosticAttemptOutcome(val code: String) {
     Cancelled("cancelled"),
 }
 
+enum class DiagnosticStopOutcome(val code: String) {
+    Running("running"),
+    Completed("completed"),
+}
+
 data class DiagnosticStageTiming(
     val key: String,
     val label: String,
@@ -259,6 +264,22 @@ data class DiagnosticConnectionAttempt(
             .maxByOrNull { it.durationMillis ?: -1L }
 }
 
+data class DiagnosticStopAttempt(
+    val generation: Long,
+    val trigger: String,
+    val startedAtEpochMillis: Long,
+    internal val startedAtElapsedRealtimeMillis: Long,
+    val totalDurationMillis: Long? = null,
+    val outcome: DiagnosticStopOutcome = DiagnosticStopOutcome.Running,
+    val stages: List<DiagnosticStageTiming> = emptyList(),
+) {
+    val slowestCompletedStage: DiagnosticStageTiming?
+        get() = stages
+            .asSequence()
+            .filter { it.durationMillis != null }
+            .maxByOrNull { it.durationMillis ?: -1L }
+}
+
 data class DiagnosticState(
     val generation: Long = 0,
     val lastFailure: DiagnosticFailure? = null,
@@ -272,6 +293,7 @@ data class DiagnosticState(
     val effectiveOverlay: String? = null,
     val connectionAttempt: DiagnosticConnectionAttempt? = null,
     val previousConnectionAttempts: List<DiagnosticConnectionAttempt> = emptyList(),
+    val stopAttempt: DiagnosticStopAttempt? = null,
     val previousCrash: AppCrashRecord? = null,
     val previousProcessExit: AppProcessExitRecord? = null,
 ) {

@@ -597,6 +597,8 @@ object RuntimeConfigBuilder {
         packageName?.let {
             put("package_name", JsonArray(listOf(JsonPrimitive(it))))
         }
+        put("network", "tcp")
+        put("port", 443)
         put(
             "domain",
             JsonArray(ManagedHealthProbe.hosts.map(::JsonPrimitive)),

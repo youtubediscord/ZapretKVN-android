@@ -212,4 +212,37 @@ class DiagnosticModelsTest {
         assertEquals("core_tun", attempt.slowestCompletedStage?.key)
         assertEquals(610L, attempt.slowestCompletedStage?.durationMillis)
     }
+
+    @Test
+    fun `stop attempt exposes the slowest teardown stage`() {
+        val attempt = DiagnosticStopAttempt(
+            generation = 8,
+            trigger = "user_stop",
+            startedAtEpochMillis = 2_000,
+            startedAtElapsedRealtimeMillis = 200,
+            totalDurationMillis = 750,
+            outcome = DiagnosticStopOutcome.Completed,
+            stages = listOf(
+                DiagnosticStageTiming(
+                    key = "close_tun",
+                    label = "Закрытие Android TUN",
+                    startedAtEpochMillis = 2_000,
+                    startedAtElapsedRealtimeMillis = 200,
+                    durationMillis = 4,
+                    status = DiagnosticStageStatus.Success,
+                ),
+                DiagnosticStageTiming(
+                    key = "close_libbox_service",
+                    label = "Остановка сервиса libbox",
+                    startedAtEpochMillis = 2_004,
+                    startedAtElapsedRealtimeMillis = 204,
+                    durationMillis = 710,
+                    status = DiagnosticStageStatus.Success,
+                ),
+            ),
+        )
+
+        assertEquals("close_libbox_service", attempt.slowestCompletedStage?.key)
+        assertEquals(710L, attempt.slowestCompletedStage?.durationMillis)
+    }
 }

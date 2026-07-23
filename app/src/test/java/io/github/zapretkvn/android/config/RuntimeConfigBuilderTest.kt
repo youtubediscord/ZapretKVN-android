@@ -399,6 +399,8 @@ class RuntimeConfigBuilderTest {
         assertEquals("tls", ((rules[0]["sniffer"] as JsonArray).single() as JsonPrimitive).content)
         assertTrue(rules[0]["package_name"].toString().contains("io.github.zapretkvn.android.debug"))
         assertEquals("zapret-proxy", rules[1].string("outbound"))
+        assertEquals("tcp", rules[1].string("network"))
+        assertEquals("443", (rules[1]["port"] as JsonPrimitive).content)
         assertTrue(rules[1]["domain"].toString().contains("cp.cloudflare.com"))
         assertTrue(rules[1]["package_name"].toString().contains("io.github.zapretkvn.android.debug"))
         assertFalse("stored profile must stay untouched", "\"sniff\"" in stored)

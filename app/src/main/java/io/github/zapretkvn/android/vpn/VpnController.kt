@@ -17,6 +17,8 @@ import io.github.zapretkvn.android.diagnostics.DiagnosticNetworkState
 import io.github.zapretkvn.android.diagnostics.DiagnosticState
 import io.github.zapretkvn.android.diagnostics.DiagnosticStageStatus
 import io.github.zapretkvn.android.diagnostics.DiagnosticStageTiming
+import io.github.zapretkvn.android.diagnostics.DiagnosticStopAttempt
+import io.github.zapretkvn.android.diagnostics.DiagnosticStopOutcome
 import io.github.zapretkvn.android.diagnostics.DiagnosticVpnPolicy
 import io.github.zapretkvn.android.diagnostics.AppCrashRecord
 import io.github.zapretkvn.android.diagnostics.AppProcessExitReader
@@ -307,6 +309,113 @@ class VpnController(
             outcome = DiagnosticAttemptOutcome.Cancelled,
             stageStatus = DiagnosticStageStatus.Cancelled,
         )
+    }
+
+    internal fun beginStopDiagnostic(generation: Long, trigger: String) {
+        val elapsed = SystemClock.elapsedRealtime()
+        val epoch = System.currentTimeMillis()
+        mutableDiagnostics.update { current ->
+            current.copy(
+                generation = generation,
+                stopAttempt = DiagnosticStopAttempt(
+                    generation = generation,
+                    trigger = trigger.take(40),
+                    startedAtEpochMillis = epoch,
+                    startedAtElapsedRealtimeMillis = elapsed,
+                ),
+            )
+        }
+    }
+
+    internal fun startStopDiagnosticStage(
+        generation: Long,
+        key: String,
+        label: String,
+    ) {
+        val elapsed = SystemClock.elapsedRealtime()
+        val epoch = System.currentTimeMillis()
+        mutableDiagnostics.update { current ->
+            val attempt = current.stopAttempt
+                ?.takeIf { it.generation == generation && it.outcome == DiagnosticStopOutcome.Running }
+                ?: return@update current
+            val completed = attempt.stages.completeRunningStage(
+                elapsed = elapsed,
+                status = DiagnosticStageStatus.Success,
+            )
+            current.copy(
+                stopAttempt = attempt.copy(
+                    stages = (completed + DiagnosticStageTiming(
+                        key = key.take(48),
+                        label = label.take(80),
+                        startedAtEpochMillis = epoch,
+                        startedAtElapsedRealtimeMillis = elapsed,
+                    )).takeLast(MAX_DIAGNOSTIC_STAGES),
+                ),
+            )
+        }
+    }
+
+    internal fun finishStopDiagnosticStage(
+        generation: Long,
+        key: String,
+        error: Throwable? = null,
+    ) {
+        val elapsed = SystemClock.elapsedRealtime()
+        val safeKey = key.take(48)
+        val detail = error?.let {
+            sanitizeDiagnosticText(
+                generateSequence(it) { cause -> cause.cause }
+                    .mapNotNull(Throwable::message)
+                    .firstOrNull(String::isNotBlank)
+                    ?: it.javaClass.simpleName,
+                MAX_DIAGNOSTIC_STAGE_DETAIL_CHARS,
+            )
+        }
+        mutableDiagnostics.update { current ->
+            val attempt = current.stopAttempt
+                ?.takeIf { it.generation == generation && it.outcome == DiagnosticStopOutcome.Running }
+                ?: return@update current
+            current.copy(
+                stopAttempt = attempt.copy(
+                    stages = attempt.stages.map { stage ->
+                        if (stage.key == safeKey && stage.status == DiagnosticStageStatus.Running) {
+                            stage.copy(
+                                durationMillis = (elapsed - stage.startedAtElapsedRealtimeMillis)
+                                    .coerceAtLeast(0L),
+                                status = if (error == null) {
+                                    DiagnosticStageStatus.Success
+                                } else {
+                                    DiagnosticStageStatus.Failed
+                                },
+                                detail = detail,
+                            )
+                        } else {
+                            stage
+                        }
+                    },
+                ),
+            )
+        }
+    }
+
+    internal fun completeStopDiagnostic(generation: Long) {
+        val elapsed = SystemClock.elapsedRealtime()
+        mutableDiagnostics.update { current ->
+            val attempt = current.stopAttempt
+                ?.takeIf { it.generation == generation && it.outcome == DiagnosticStopOutcome.Running }
+                ?: return@update current
+            current.copy(
+                stopAttempt = attempt.copy(
+                    totalDurationMillis = (elapsed - attempt.startedAtElapsedRealtimeMillis)
+                        .coerceAtLeast(0L),
+                    outcome = DiagnosticStopOutcome.Completed,
+                    stages = attempt.stages.completeRunningStage(
+                        elapsed,
+                        DiagnosticStageStatus.Success,
+                    ),
+                ),
+            )
+        }
     }
 
     internal fun publishGroups(generation: Long, groups: List<RuntimeSelectorGroup>) {

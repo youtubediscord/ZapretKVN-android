@@ -88,6 +88,21 @@ class DiagnosticExportInstrumentedTest {
                     connectedAtEpochMillis = System.currentTimeMillis(),
                 ),
             )
+            val stopToken = container.vpnController.nextGeneration()
+            container.vpnController.beginStopDiagnostic(stopToken, "instrumented_stop")
+            container.vpnController.startStopDiagnosticStage(
+                stopToken,
+                "close_tun",
+                "Закрытие Android TUN",
+            )
+            container.vpnController.finishStopDiagnosticStage(stopToken, "close_tun")
+            container.vpnController.startStopDiagnosticStage(
+                stopToken,
+                "close_libbox_service",
+                "Остановка сервиса libbox",
+            )
+            container.vpnController.finishStopDiagnosticStage(stopToken, "close_libbox_service")
+            container.vpnController.completeStopDiagnostic(stopToken)
             container.appCrashStore.record(
                 threadName = "test-worker",
                 throwable = IllegalStateException("token=super-secret"),
@@ -104,7 +119,7 @@ class DiagnosticExportInstrumentedTest {
 
             val report = exporter.createReport()
             JsonConfig.parse(report)
-            assertTrue("\"report_version\": 3" in report)
+            assertTrue("\"report_version\": 4" in report)
             assertTrue(BuildConfig.CORE_COMMIT in report)
             assertTrue(BuildConfig.CORE_PATCH_SHA256 in report)
             assertTrue("\"private_dns_mode\"" in report)
@@ -114,6 +129,9 @@ class DiagnosticExportInstrumentedTest {
             assertTrue("\"effective_overlay\"" in report)
             assertTrue("\"connection_attempt\"" in report)
             assertTrue("\"connection_attempts\"" in report)
+            assertTrue("\"stop_attempt\"" in report)
+            assertTrue("\"close_tun\"" in report)
+            assertTrue("\"close_libbox_service\"" in report)
             assertTrue("\"startup_core_logs\"" in report)
             assertTrue("\"startup_core_log_stats\"" in report)
             assertTrue("\"log_stats\"" in report)

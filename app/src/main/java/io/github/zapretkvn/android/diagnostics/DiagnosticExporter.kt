@@ -4,6 +4,7 @@ import android.content.ClipData
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import android.os.SystemClock
 import androidx.core.content.FileProvider
 import io.github.zapretkvn.android.BuildConfig
 import io.github.zapretkvn.android.config.DnsMode
@@ -85,7 +86,7 @@ class DiagnosticExporter(
         val network = readCurrentNetwork(diagnostics.network)
         val now = System.currentTimeMillis()
         val root = buildJsonObject {
-            put("report_version", 3)
+            put("report_version", 4)
             put("created_at", isoTimestamp(now))
             put("created_at_epoch_ms", now)
             put(
@@ -157,6 +158,10 @@ class DiagnosticExporter(
                 buildJsonArray {
                     diagnostics.recentConnectionAttempts.forEach { add(connectionAttemptJson(it)) }
                 },
+            )
+            put(
+                "stop_attempt",
+                diagnostics.stopAttempt?.let(::stopAttemptJson) ?: JsonNull,
             )
             put("previous_crash", crashJson(crashStore.read()))
             put("previous_process_exit", processExitJson(diagnostics.previousProcessExit))
@@ -309,6 +314,52 @@ class DiagnosticExporter(
             put(
                 "startup_core_log_stats",
                 logStatsJson(attempt.startupCoreLogStats, attempt.startupCoreLogs.size),
+            )
+        }
+
+    private fun stopAttemptJson(attempt: DiagnosticStopAttempt): JsonObject =
+        buildJsonObject {
+            val elapsed = SystemClock.elapsedRealtime()
+            put("generation", attempt.generation)
+            put("trigger", attempt.trigger)
+            put("started_at_epoch_ms", attempt.startedAtEpochMillis)
+            put("outcome", attempt.outcome.code)
+            put(
+                "total_duration_ms",
+                attempt.totalDurationMillis
+                    ?: (elapsed - attempt.startedAtElapsedRealtimeMillis).coerceAtLeast(0L),
+            )
+            attempt.slowestCompletedStage?.let { slowest ->
+                put(
+                    "slowest_stage",
+                    buildJsonObject {
+                        put("key", slowest.key)
+                        put("label", slowest.label)
+                        put("duration_ms", checkNotNull(slowest.durationMillis))
+                    },
+                )
+            }
+            put(
+                "stages",
+                buildJsonArray {
+                    attempt.stages.forEach { stage ->
+                        add(
+                            buildJsonObject {
+                                put("key", stage.key)
+                                put("label", stage.label)
+                                put("started_at_epoch_ms", stage.startedAtEpochMillis)
+                                put(
+                                    "duration_ms",
+                                    stage.durationMillis
+                                        ?: (elapsed - stage.startedAtElapsedRealtimeMillis)
+                                            .coerceAtLeast(0L),
+                                )
+                                put("status", stage.status.code)
+                                stage.detail?.let { put("detail", it) }
+                            },
+                        )
+                    }
+                },
             )
         }
 

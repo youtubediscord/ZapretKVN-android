@@ -18,6 +18,7 @@ import io.github.zapretkvn.android.ZapretApplication
 import io.github.zapretkvn.android.config.ConfigAnalyzer
 import io.github.zapretkvn.android.config.DnsMode
 import io.github.zapretkvn.android.config.OutboundDescription
+import io.github.zapretkvn.android.config.BootstrapConfig
 import io.github.zapretkvn.android.config.RuntimeConfigOptions
 import io.github.zapretkvn.android.config.RuntimeConfigBuilder
 import io.github.zapretkvn.android.config.SelectorGroup
@@ -42,7 +43,9 @@ import io.nekohasekai.libbox.OverrideOptions
 import io.nekohasekai.libbox.StatusMessage
 import io.nekohasekai.libbox.StringIterator
 import io.nekohasekai.libbox.SystemProxyStatus
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -134,10 +137,17 @@ class ZapretVpnService : VpnService() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val serviceLock = Mutex()
     private val foregroundActive = AtomicBoolean(false)
+    private val stopInProgress = AtomicBoolean(false)
+    private val sessionStateLock = Any()
+    private val lifecycleJobLock = Any()
 
     private val container by lazy { (application as ZapretApplication).container }
     private val controller by lazy { container.vpnController }
+    @Volatile
     private var activeSession: ActiveSession? = null
+    @Volatile
+    private var pendingSession: ActiveSession? = null
+    private var lifecycleJob: Job? = null
     private var terminalError = false
     private val restartScheduleLock = Any()
     private var networkRestartJob: Job? = null
@@ -191,32 +201,21 @@ class ZapretVpnService : VpnService() {
     override fun onBind(intent: Intent): IBinder? = super.onBind(intent)
 
     override fun onRevoke() {
-        cancelScheduledNetworkRestart()
-        controller.cancelCurrentConnectionDiagnostic()
-        val token = controller.nextGeneration()
-        terminalError = true
-        controller.publish(token, VpnConnectionState.Stopping(activeSession?.profileId))
-        runBlocking(Dispatchers.IO) {
-            serviceLock.withLock {
-                activeSession?.close()
-                activeSession = null
-            }
-        }
-        finishForeground()
-        stopSelf()
-        controller.publish(token, VpnConnectionState.Error("Разрешение Android VPN отозвано."))
+        requestStop(
+            startId = 0,
+            errorMessage = "Разрешение Android VPN отозвано.",
+            trigger = "permission_revoked",
+        )
         super.onRevoke()
     }
 
     override fun onDestroy() {
         cancelScheduledNetworkRestart()
         controller.cancelCurrentConnectionDiagnostic()
-        runBlocking {
-            serviceLock.withLock {
-                activeSession?.close()
-                activeSession = null
-            }
-        }
+        cancelLifecycleJob()
+        val remaining = detachSessions()
+        remaining.forEach(ActiveSession::closeTun)
+        runBlocking(Dispatchers.IO) { remaining.forEach(ActiveSession::close) }
         serviceScope.cancel()
         finishForeground()
         if (!terminalError) {
@@ -226,6 +225,7 @@ class ZapretVpnService : VpnService() {
     }
 
     private fun requestStart(profileId: String, startId: Int, updaterRouting: Boolean) {
+        stopInProgress.set(false)
         val token = controller.nextGeneration()
         terminalError = false
         controller.beginConnectionDiagnostic(token, "user_start")
@@ -235,10 +235,9 @@ class ZapretVpnService : VpnService() {
             VpnConnectionState.Starting(profileId, "Проверка профиля", updaterRouting),
         )
         showForeground(ForegroundNotificationState.ValidatingProfile)
-        serviceScope.launch {
+        trackLifecycleJob(serviceScope.launch {
             serviceLock.withLock {
-                activeSession?.close()
-                activeSession = null
+                detachSessions().forEach(ActiveSession::close)
                 if (token != controller.currentGeneration()) return@withLock
                 try {
                     startWithDeadline(token, profileId, updaterRouting = updaterRouting)
@@ -248,7 +247,7 @@ class ZapretVpnService : VpnService() {
                     }
                 }
             }
-        }
+        })
     }
 
     private suspend fun startLocked(
@@ -280,6 +279,9 @@ class ZapretVpnService : VpnService() {
             "Автоматический DNS должен быть разрешён в один runtime-кандидат до запуска core."
         }
         val vpnHiding = uiSettings.vpnHiding
+        if (dnsMode == DnsMode.FromJson) {
+            ConfigAnalyzer.dnsWarnings(profile.json).forEach(controller::publishDiagnosticWarning)
+        }
         val appSelection = container.appSelectionStore.selection.first()
         val selectedPackages = appSelection.allowedPackages
         val preflight = container.vpnAppScopePreflight.apply(
@@ -416,8 +418,12 @@ class ZapretVpnService : VpnService() {
             updaterRouting = updaterRouting,
             controller = controller,
         )
+        if (!registerPendingSession(resources, token)) {
+            resources.close()
+            throw CancellationException("Запуск отменён.")
+        }
         try {
-            resources.platform = AndroidPlatformAdapter(
+            resources.attachPlatform(AndroidPlatformAdapter(
                 service = this,
                 selectedPackages = selectedPackages,
                 scopeMode = appSelection.mode,
@@ -425,14 +431,16 @@ class ZapretVpnService : VpnService() {
                 scopePreflight = container.vpnAppScopePreflight,
                 networkMonitor = networkMonitor,
                 sessionName = VpnRuntimeHardening.sessionName(vpnHiding),
-            )
+            ))
             controller.startConnectionDiagnosticStage(token, "command_server", "Запуск локального command server")
-            resources.server = Libbox.newCommandServer(
+            val commandServer = Libbox.newCommandServer(
                 ServerHandler(this),
-                resources.platform,
-            ).also(CommandServer::start)
+                resources.platform(),
+            )
+            resources.attachServer(commandServer)
+            commandServer.start()
             controller.startConnectionDiagnosticStage(token, "core_service", "Запуск sing-box и создание TUN")
-            resources.server?.startOrReloadService(
+            commandServer.startOrReloadService(
                 runtimeJson,
                 OverrideOptions().apply {
                     includePackage = ListStringIterator(
@@ -453,7 +461,7 @@ class ZapretVpnService : VpnService() {
             controller.startConnectionDiagnosticStage(token, "core_log", "Снимок bounded core-лога")
             resources.openLogClient(controller)
             controller.startConnectionDiagnosticStage(token, "group_client", "Чтение selector-групп")
-            resources.client = Libbox.newCommandClient(
+            val groupClient = Libbox.newCommandClient(
                 GroupClientHandler(
                     controller,
                     token,
@@ -462,18 +470,21 @@ class ZapretVpnService : VpnService() {
                 CommandClientOptions().apply {
                     addCommand(Libbox.CommandGroup)
                 },
-            ).also(CommandClient::connect)
+            )
+            resources.attachClient(groupClient)
+            groupClient.connect()
             check(token == controller.currentGeneration()) { "Запуск отменён." }
             controller.publish(
                 token,
                 VpnConnectionState.Starting(profileId, "Проверка DNS и HTTPS", updaterRouting),
             )
             showForeground(ForegroundNotificationState.CheckingHealth)
-            val dnsServer = resources.platform?.internalDnsServer
+            val dnsServer = resources.platform().internalDnsServer
                 ?: error("libbox не передал внутренний DNS TUN.")
             val health = container.vpnHealthPipeline.verify(
                 mode = dnsMode,
                 internalDnsServer = dnsServer,
+                proxyIpFamily = BootstrapConfig.selectedProxyIpFamily(profile.json),
                 onStageStarted = { stage ->
                     controller.startConnectionDiagnosticStage(
                         token,
@@ -497,10 +508,10 @@ class ZapretVpnService : VpnService() {
             check(token == controller.currentGeneration()) { "Запуск отменён." }
             controller.startConnectionDiagnosticStage(token, "finalize", "Финализация сессии")
             container.proxyBootstrapper.recordSuccess(profileId, preparedBootstrap)
-            activeSession = resources
-            resources.networkObserver = networkMonitor.observe { state ->
+            check(activatePendingSession(resources, token)) { "Запуск отменён." }
+            resources.attachNetworkObserver(networkMonitor.observe { state ->
                 onUnderlyingNetworkEvent(resources, state)
-            }
+            })
             controller.publish(
                 token,
                 VpnConnectionState.Connected(
@@ -515,11 +526,14 @@ class ZapretVpnService : VpnService() {
             if (!controller.diagnosticsVisible.value) resources.closeLogClient(controller)
             if (health.externalIpProbeAllowed) startConnectionIdentityProbe(resources)
         } catch (error: Throwable) {
+            discardSession(resources)
             resources.close()
             throw error
         }
 
+        if (token == controller.currentGeneration() && activeSession === resources) {
             showForeground(ForegroundNotificationState.Connected)
+        }
     }
 
     private suspend fun startWithDeadline(
@@ -577,8 +591,9 @@ class ZapretVpnService : VpnService() {
         noCacheLookup: Boolean,
         updaterRouting: Boolean? = null,
     ) {
+        stopInProgress.set(false)
         val token = controller.nextGeneration()
-        serviceScope.launch {
+        trackLifecycleJob(serviceScope.launch {
             serviceLock.withLock {
                 if (token != controller.currentGeneration()) return@withLock
                 val targetProfile = activeSession?.profileId ?: profileId
@@ -601,8 +616,7 @@ class ZapretVpnService : VpnService() {
                     VpnConnectionState.Starting(targetProfile, reason, targetUpdaterRouting),
                 )
                 showForeground(ForegroundNotificationState.Restarting)
-                activeSession?.close()
-                activeSession = null
+                detachSessions().forEach(ActiveSession::close)
                 try {
                     startWithDeadline(
                         token,
@@ -614,7 +628,7 @@ class ZapretVpnService : VpnService() {
                     if (token == controller.currentGeneration()) failLocked(token, error, startId)
                 }
             }
-        }
+        })
     }
 
     private fun requestClearDnsCache(startId: Int) {
@@ -688,26 +702,45 @@ class ZapretVpnService : VpnService() {
         startId: Int,
         errorMessage: String?,
         systemPolicy: VpnSystemPolicy? = null,
+        trigger: String = if (errorMessage == null) "user_stop" else "policy_stop",
     ) {
+        if (!stopInProgress.compareAndSet(false, true)) return
         cancelScheduledNetworkRestart()
         controller.cancelCurrentConnectionDiagnostic()
         val token = controller.nextGeneration()
+        controller.beginStopDiagnostic(token, trigger)
         systemPolicy?.let { controller.publishVpnSystemPolicy(token, it) }
         terminalError = errorMessage != null
-        val profileId = activeSession?.profileId
+        val sessions = detachSessions()
+        sessions.forEach { it.enableStopDiagnostics(token) }
+        val profileId = sessions.firstOrNull()?.profileId
+
+        controller.startStopDiagnosticStage(token, "cancel_run", "Отмена текущего запуска")
+        cancelLifecycleJob()
+        controller.finishStopDiagnosticStage(token, "cancel_run")
+
         controller.publish(token, VpnConnectionState.Stopping(profileId))
         showForeground(ForegroundNotificationState.Stopping)
+        sessions.forEach(ActiveSession::closeTun)
         serviceScope.launch {
-            serviceLock.withLock {
-                activeSession?.close()
-                activeSession = null
-                finishForeground()
-                if (startId > 0) stopSelfResult(startId) else stopSelf()
-                if (errorMessage == null) {
-                    controller.publish(token, VpnConnectionState.Stopped)
-                } else {
-                    controller.publish(token, VpnConnectionState.Error(errorMessage))
+            sessions.forEach(ActiveSession::close)
+            if (sessions.isEmpty()) {
+                listOf(
+                    "close_tun" to "Закрытие Android TUN",
+                    "close_clients" to "Отключение клиентов libbox",
+                    "close_libbox_service" to "Остановка сервиса libbox",
+                ).forEach { (key, label) ->
+                    controller.startStopDiagnosticStage(token, key, label)
+                    controller.finishStopDiagnosticStage(token, key)
                 }
+            }
+            controller.completeStopDiagnostic(token)
+            finishForeground()
+            if (startId > 0) stopSelfResult(startId) else stopSelf()
+            if (errorMessage == null) {
+                controller.publish(token, VpnConnectionState.Stopped)
+            } else {
+                controller.publish(token, VpnConnectionState.Error(errorMessage))
             }
         }
     }
@@ -718,7 +751,7 @@ class ZapretVpnService : VpnService() {
         outboundTag: String,
         startId: Int,
     ) {
-        serviceScope.launch {
+        trackLifecycleJob(serviceScope.launch {
             serviceLock.withLock {
                 val session = activeSession
                 if (session == null || session.profileId != profileId) {
@@ -751,8 +784,7 @@ class ZapretVpnService : VpnService() {
                         ),
                     )
                     showForeground(ForegroundNotificationState.Restarting)
-                    activeSession?.close()
-                    activeSession = null
+                    detachSessions().forEach(ActiveSession::close)
                     try {
                         startWithDeadline(
                             restartToken,
@@ -770,7 +802,7 @@ class ZapretVpnService : VpnService() {
                     showForeground(ForegroundNotificationState.Connected)
                 }
             }
-        }
+        })
     }
 
     private fun requestPing(startId: Int) {
@@ -845,7 +877,7 @@ class ZapretVpnService : VpnService() {
     }
 
     private fun startHomeStatusObserver(session: ActiveSession) {
-        session.statusObserver = serviceScope.launch {
+        session.attachStatusObserver(serviceScope.launch {
             controller.homeVisible.collect { visible ->
                 if (activeSession !== session) return@collect
                 if (visible) {
@@ -854,11 +886,11 @@ class ZapretVpnService : VpnService() {
                     session.closeStatusClient(controller)
                 }
             }
-        }
+        })
     }
 
     private fun startDiagnosticsObserver(session: ActiveSession) {
-        session.diagnosticsObserver = serviceScope.launch {
+        session.attachDiagnosticsObserver(serviceScope.launch {
             controller.diagnosticsVisible.collect { visible ->
                 if (activeSession !== session) return@collect
                 if (visible) {
@@ -867,12 +899,11 @@ class ZapretVpnService : VpnService() {
                     session.closeLogClient(controller)
                 }
             }
-        }
+        })
     }
 
     private fun startConnectionIdentityProbe(session: ActiveSession) {
-        session.identityJob?.cancel()
-        session.identityJob = serviceScope.launch {
+        session.replaceIdentityJob(serviceScope.launch {
             coroutineScope {
                 launch {
                     val target = session.selectedPingTarget(controller.selectorGroups.value)
@@ -889,7 +920,7 @@ class ZapretVpnService : VpnService() {
                     }
                 }
             }
-        }
+        })
     }
 
     private suspend fun measureServerPing(
@@ -910,7 +941,7 @@ class ZapretVpnService : VpnService() {
         val candidate = ConfigAnalyzer.selectServer(stored.json, groupTag, outboundTag)
         withContext(Dispatchers.Default) { Libbox.checkConfig(candidate) }
         container.profileStore.update(session.profileId, candidate)
-        val client = session.client ?: error("Клиент управления sing-box недоступен.")
+        val client = session.client() ?: error("Клиент управления sing-box недоступен.")
         try {
             client.selectOutbound(groupTag, outboundTag)
         } catch (error: Throwable) {
@@ -921,8 +952,7 @@ class ZapretVpnService : VpnService() {
 
     private suspend fun failLocked(token: Long, error: Throwable, startId: Int) {
         cancelScheduledNetworkRestart()
-        activeSession?.close()
-        activeSession = null
+        detachSessions().forEach(ActiveSession::close)
         terminalError = true
         val failure = safeError(error)
         finishForeground()
@@ -972,6 +1002,66 @@ class ZapretVpnService : VpnService() {
             networkRestartJob?.cancel()
             networkRestartJob = null
         }
+    }
+
+    private fun trackLifecycleJob(job: Job) {
+        val previous = synchronized(lifecycleJobLock) {
+            val old = lifecycleJob
+            lifecycleJob = job
+            old
+        }
+        previous?.cancel()
+        job.invokeOnCompletion {
+            synchronized(lifecycleJobLock) {
+                if (lifecycleJob === job) lifecycleJob = null
+            }
+        }
+    }
+
+    private fun cancelLifecycleJob() {
+        synchronized(lifecycleJobLock) {
+            lifecycleJob?.cancel(CancellationException("VPN lifecycle отменён."))
+            lifecycleJob = null
+        }
+    }
+
+    private fun registerPendingSession(session: ActiveSession, generation: Long): Boolean =
+        synchronized(sessionStateLock) {
+            if (generation != controller.currentGeneration()) {
+                false
+            } else {
+                check(pendingSession == null) { "Параллельный запуск VPN запрещён." }
+                pendingSession = session
+                true
+            }
+        }
+
+    private fun activatePendingSession(session: ActiveSession, generation: Long): Boolean =
+        synchronized(sessionStateLock) {
+            if (
+                generation != controller.currentGeneration() ||
+                pendingSession !== session
+            ) {
+                false
+            } else {
+                pendingSession = null
+                activeSession = session
+                true
+            }
+        }
+
+    private fun discardSession(session: ActiveSession) {
+        synchronized(sessionStateLock) {
+            if (pendingSession === session) pendingSession = null
+            if (activeSession === session) activeSession = null
+        }
+    }
+
+    private fun detachSessions(): List<ActiveSession> = synchronized(sessionStateLock) {
+        val sessions = listOfNotNull(activeSession, pendingSession).distinct()
+        activeSession = null
+        pendingSession = null
+        sessions
     }
 
     private fun finishForeground() {
@@ -1027,19 +1117,24 @@ class ZapretVpnService : VpnService() {
         val updaterRouting: Boolean,
         private val controller: VpnController,
     ) : AutoCloseable {
-        private val closed = AtomicBoolean(false)
+        private val closing = AtomicBoolean(false)
+        private val tunCloseStarted = AtomicBoolean(false)
+        private val cleanupStarted = AtomicBoolean(false)
+        private val cleanupComplete = CountDownLatch(1)
         private val libboxStarted = AtomicBoolean(false)
-        var platform: AndroidPlatformAdapter? = null
-        var server: CommandServer? = null
-        var client: CommandClient? = null
-        var networkObserver: AutoCloseable? = null
-        var statusObserver: Job? = null
-        var diagnosticsObserver: Job? = null
-        var identityJob: Job? = null
+        private val resourceLock = Any()
+        @Volatile private var platform: AndroidPlatformAdapter? = null
+        @Volatile private var server: CommandServer? = null
+        @Volatile private var client: CommandClient? = null
+        private var networkObserver: AutoCloseable? = null
+        private var statusObserver: Job? = null
+        private var diagnosticsObserver: Job? = null
+        private var identityJob: Job? = null
         private var statusClient: CommandClient? = null
         private var statusClientCounted = false
         private var logClient: CommandClient? = null
         private var logClientCounted = false
+        @Volatile private var stopDiagnosticGeneration = Long.MIN_VALUE
         private val pingTargetResolver = ServerPingTargetResolver(outboundDescriptions, selectorGroups)
 
         init {
@@ -1054,13 +1149,120 @@ class ZapretVpnService : VpnService() {
             groups: List<RuntimeSelectorGroup>,
         ): List<ServerPingTarget> = pingTargetResolver.group(groupTag, groups)
 
+        fun attachPlatform(candidate: AndroidPlatformAdapter) {
+            val accepted = synchronized(resourceLock) {
+                if (closing.get()) false else {
+                    check(platform == null)
+                    platform = candidate
+                    true
+                }
+            }
+            if (!accepted) {
+                candidate.close()
+                throw CancellationException("Запуск отменён до создания TUN.")
+            }
+        }
+
+        fun platform(): AndroidPlatformAdapter =
+            platform ?: throw CancellationException("Android VPN adapter уже закрыт.")
+
+        fun attachServer(candidate: CommandServer) {
+            val accepted = synchronized(resourceLock) {
+                if (closing.get()) false else {
+                    check(server == null)
+                    server = candidate
+                    true
+                }
+            }
+            if (!accepted) {
+                runCatching { candidate.close() }
+                throw CancellationException("Запуск command server отменён.")
+            }
+        }
+
+        fun attachClient(candidate: CommandClient) {
+            val accepted = synchronized(resourceLock) {
+                if (closing.get()) false else {
+                    check(client == null)
+                    client = candidate
+                    true
+                }
+            }
+            if (!accepted) {
+                runCatching { candidate.disconnect() }
+                throw CancellationException("Подключение command client отменено.")
+            }
+        }
+
+        fun client(): CommandClient? = client
+
+        fun attachNetworkObserver(candidate: AutoCloseable) {
+            val accepted = synchronized(resourceLock) {
+                if (closing.get()) false else {
+                    check(networkObserver == null)
+                    networkObserver = candidate
+                    true
+                }
+            }
+            if (!accepted) runCatching { candidate.close() }
+        }
+
+        fun attachStatusObserver(candidate: Job) = attachJob(candidate) {
+            check(statusObserver == null)
+            statusObserver = candidate
+        }
+
+        fun attachDiagnosticsObserver(candidate: Job) = attachJob(candidate) {
+            check(diagnosticsObserver == null)
+            diagnosticsObserver = candidate
+        }
+
+        fun replaceIdentityJob(candidate: Job) {
+            val previous = synchronized(resourceLock) {
+                if (closing.get()) {
+                    null
+                } else {
+                    identityJob.also { identityJob = candidate }
+                }
+            }
+            previous?.cancel()
+            if (closing.get()) candidate.cancel()
+        }
+
+        private inline fun attachJob(candidate: Job, crossinline attach: () -> Unit) {
+            val accepted = synchronized(resourceLock) {
+                if (closing.get()) false else {
+                    attach()
+                    true
+                }
+            }
+            if (!accepted) candidate.cancel()
+        }
+
         fun markLibboxStarted() {
-            if (libboxStarted.compareAndSet(false, true)) VpnRuntimeMetrics.libboxOpened()
+            if (!closing.get() && libboxStarted.compareAndSet(false, true)) {
+                VpnRuntimeMetrics.libboxOpened()
+            }
+        }
+
+        fun enableStopDiagnostics(generation: Long) {
+            stopDiagnosticGeneration = generation
+        }
+
+        fun closeTun() {
+            closing.set(true)
+            if (!tunCloseStarted.compareAndSet(false, true)) return
+            timedStopStage("close_tun", "Закрытие Android TUN") {
+                val current = synchronized(resourceLock) {
+                    platform.also { platform = null }
+                }
+                current?.close()
+            }
         }
 
         @Synchronized
         fun openStatusClient(controller: VpnController) {
-            if (closed.get() || statusClient != null) return
+            if (closing.get() || statusClient != null) return
             val candidate = Libbox.newCommandClient(
                 StatusClientHandler(controller, generation),
                 CommandClientOptions().apply {
@@ -1070,7 +1272,7 @@ class ZapretVpnService : VpnService() {
             )
             try {
                 candidate.connect()
-                if (closed.get()) {
+                if (closing.get()) {
                     runCatching { candidate.disconnect() }
                     return
                 }
@@ -1098,14 +1300,14 @@ class ZapretVpnService : VpnService() {
 
         @Synchronized
         fun openLogClient(controller: VpnController) {
-            if (closed.get() || logClient != null) return
+            if (closing.get() || logClient != null) return
             val candidate = Libbox.newCommandClient(
                 DiagnosticLogClientHandler(controller, generation),
                 CommandClientOptions().apply { addCommand(Libbox.CommandLog) },
             )
             try {
                 candidate.connect()
-                if (closed.get()) {
+                if (closing.get()) {
                     runCatching { candidate.disconnect() }
                     return
                 }
@@ -1131,29 +1333,68 @@ class ZapretVpnService : VpnService() {
             controller.publishDiagnosticLogStream(generation, false)
         }
 
-        @Synchronized
         override fun close() {
-            if (!closed.compareAndSet(false, true)) return
-            statusObserver?.cancel()
-            statusObserver = null
-            diagnosticsObserver?.cancel()
-            diagnosticsObserver = null
-            identityJob?.cancel()
-            identityJob = null
-            closeStatusClient(controller)
-            closeLogClient(controller)
-            runCatching { client?.disconnect() }
-            client = null
-            runCatching { networkObserver?.close() }
-            networkObserver = null
-            runCatching { server?.closeService() }
-            if (libboxStarted.compareAndSet(true, false)) VpnRuntimeMetrics.libboxClosed()
-            runCatching { platform?.close() }
-            platform = null
-            runCatching { server?.close() }
-            server = null
-            runCatching { networkMonitor.close() }
-            VpnRuntimeMetrics.sessionClosed()
+            closing.set(true)
+            if (!cleanupStarted.compareAndSet(false, true)) {
+                cleanupComplete.await()
+                return
+            }
+            try {
+                closeTun()
+                timedStopStage("close_observers", "Остановка callback и фоновых задач") {
+                    val resources = synchronized(resourceLock) {
+                        listOfNotNull(statusObserver, diagnosticsObserver, identityJob).also {
+                            statusObserver = null
+                            diagnosticsObserver = null
+                            identityJob = null
+                        }
+                    }
+                    resources.forEach(Job::cancel)
+                }
+                timedStopStage("close_clients", "Отключение клиентов libbox") {
+                    closeStatusClient(controller)
+                    closeLogClient(controller)
+                    val current = synchronized(resourceLock) {
+                        client.also { client = null }
+                    }
+                    runCatching { current?.disconnect() }
+                    val observer = synchronized(resourceLock) {
+                        networkObserver.also { networkObserver = null }
+                    }
+                    runCatching { observer?.close() }
+                }
+                timedStopStage("close_libbox_service", "Остановка сервиса libbox") {
+                    runCatching { server?.closeService() }.getOrThrow()
+                }
+                if (libboxStarted.compareAndSet(true, false)) VpnRuntimeMetrics.libboxClosed()
+                timedStopStage("close_command_server", "Закрытие command server") {
+                    val current = synchronized(resourceLock) {
+                        server.also { server = null }
+                    }
+                    runCatching { current?.close() }.getOrThrow()
+                }
+                timedStopStage("close_network", "Закрытие мониторинга сети") {
+                    networkMonitor.close()
+                }
+            } finally {
+                VpnRuntimeMetrics.sessionClosed()
+                cleanupComplete.countDown()
+            }
+        }
+
+        private inline fun timedStopStage(
+            key: String,
+            label: String,
+            action: () -> Unit,
+        ) {
+            val diagnosticGeneration = stopDiagnosticGeneration
+            if (diagnosticGeneration != Long.MIN_VALUE) {
+                controller.startStopDiagnosticStage(diagnosticGeneration, key, label)
+            }
+            val error = runCatching(action).exceptionOrNull()
+            if (diagnosticGeneration != Long.MIN_VALUE) {
+                controller.finishStopDiagnosticStage(diagnosticGeneration, key, error)
+            }
         }
     }
 

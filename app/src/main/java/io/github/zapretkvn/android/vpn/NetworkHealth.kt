@@ -6,22 +6,32 @@ import io.github.zapretkvn.android.config.BootstrapHostOverlay
 import io.github.zapretkvn.android.config.DnsMode
 import io.github.zapretkvn.android.config.ManagedHealthEndpoint
 import io.github.zapretkvn.android.config.ManagedHealthProbe
+import io.github.zapretkvn.android.config.ProxyIpFamily
 import io.github.zapretkvn.android.config.ProxyBootstrapTarget
+import io.github.zapretkvn.networkbootstrap.CodedFailure
+import java.io.BufferedInputStream
+import java.io.BufferedOutputStream
 import java.io.DataInputStream
 import java.io.DataOutputStream
 import java.io.IOException
 import java.net.ConnectException
 import java.net.DatagramPacket
 import java.net.DatagramSocket
+import java.net.Inet4Address
+import java.net.Inet6Address
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Socket
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
 import java.net.URL
+import java.nio.charset.StandardCharsets
 import java.util.concurrent.ThreadLocalRandom
 import javax.net.ssl.HttpsURLConnection
+import javax.net.ssl.SNIHostName
 import javax.net.ssl.SSLException
+import javax.net.ssl.SSLPeerUnverifiedException
+import javax.net.ssl.SSLSocket
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -162,6 +172,7 @@ class VpnHealthPipeline(
     suspend fun verify(
         mode: DnsMode,
         internalDnsServer: String,
+        proxyIpFamily: ProxyIpFamily = ProxyIpFamily.Unspecified,
         onStageStarted: (VpnHealthStage) -> Unit = {},
         onStageFinished: (VpnHealthStage, VpnHealthStageOutcome, String?) -> Unit = { _, _, _ -> },
     ): HealthCheckResult {
@@ -250,11 +261,12 @@ class VpnHealthPipeline(
                 error("HTTPS-проверка через VPN не прошла: тестовый endpoint недоступен.")
             }
             try {
-                val result = httpsProbe(vpnNetwork)
+                val result = httpsProbe(vpnNetwork, proxyIpFamily)
                 onStageFinished(
                     VpnHealthStage.HttpsProbe,
                     VpnHealthStageOutcome.Success,
-                    "endpoint=${result.endpoint.code} status=${result.status}",
+                    "endpoint=${result.endpoint.code} status=${result.status} " +
+                        "family=${result.addressFamily.diagnosticName}",
                 )
             } catch (error: Throwable) {
                 onStageFinished(
@@ -385,14 +397,23 @@ class VpnHealthPipeline(
         return flags and 0x000f
     }
 
-    private suspend fun httpsProbe(vpnNetwork: Network): HttpsProbeResult = withContext(Dispatchers.IO) {
+    private suspend fun httpsProbe(
+        vpnNetwork: Network,
+        proxyIpFamily: ProxyIpFamily,
+    ): HttpsProbeResult = withContext(Dispatchers.IO) {
         val failures = mutableListOf<String>()
         var lastError: Throwable? = null
         for (endpoint in ManagedHealthProbe.endpoints) {
             try {
-                return@withContext HttpsProbeResult(endpoint, httpsProbeOne(vpnNetwork, endpoint))
+                return@withContext HttpsProbeResult(
+                    endpoint = endpoint,
+                    status = httpsProbeOne(vpnNetwork, endpoint, proxyIpFamily),
+                    addressFamily = proxyIpFamily,
+                )
             } catch (cancelled: CancellationException) {
                 throw cancelled
+            } catch (error: VpnHealthAddressFamilyException) {
+                throw error
             } catch (error: Throwable) {
                 lastError = error
                 failures += "${endpoint.code}:${httpsFailureReason(error)}"
@@ -406,7 +427,25 @@ class VpnHealthPipeline(
         )
     }
 
-    private fun httpsProbeOne(vpnNetwork: Network, endpoint: ManagedHealthEndpoint): Int {
+    private suspend fun httpsProbeOne(
+        vpnNetwork: Network,
+        endpoint: ManagedHealthEndpoint,
+        proxyIpFamily: ProxyIpFamily,
+    ): Int {
+        if (proxyIpFamily == ProxyIpFamily.Ipv4Only || proxyIpFamily == ProxyIpFamily.Ipv6Only) {
+            val addresses = resolver.resolve(vpnNetwork, endpoint.host)
+            val address = selectHealthAddress(addresses, proxyIpFamily)
+                ?: throw VpnHealthAddressFamilyException(
+                    requiredFamily = proxyIpFamily,
+                    endpointCode = endpoint.code,
+                    answerCount = addresses.size,
+                )
+            return httpsProbeOnePinned(vpnNetwork, endpoint, address)
+        }
+        return httpsProbeOneDefault(vpnNetwork, endpoint)
+    }
+
+    private fun httpsProbeOneDefault(vpnNetwork: Network, endpoint: ManagedHealthEndpoint): Int {
         val connection = vpnNetwork.openConnection(URL(endpoint.url)) as HttpsURLConnection
         try {
             connection.connectTimeout = HTTPS_ENDPOINT_TIMEOUT_MILLIS
@@ -421,6 +460,77 @@ class VpnHealthPipeline(
         } finally {
             connection.disconnect()
         }
+    }
+
+    /**
+     * Opens the selected numeric address on Android's VPN Network while keeping the
+     * original hostname for TLS SNI, certificate verification and HTTP Host.
+     */
+    private fun httpsProbeOnePinned(
+        vpnNetwork: Network,
+        endpoint: ManagedHealthEndpoint,
+        address: InetAddress,
+    ): Int {
+        val url = URL(endpoint.url)
+        val port = url.port.takeIf { it >= 0 } ?: 443
+        val plain = vpnNetwork.socketFactory.createSocket()
+        try {
+            plain.soTimeout = HTTPS_ENDPOINT_TIMEOUT_MILLIS
+            plain.connect(InetSocketAddress(address, port), HTTPS_ENDPOINT_TIMEOUT_MILLIS)
+            val tls = HttpsURLConnection.getDefaultSSLSocketFactory()
+                .createSocket(plain, endpoint.host, port, true) as SSLSocket
+            tls.use {
+                it.soTimeout = HTTPS_ENDPOINT_TIMEOUT_MILLIS
+                it.sslParameters = it.sslParameters.apply {
+                    endpointIdentificationAlgorithm = "HTTPS"
+                    serverNames = listOf(SNIHostName(endpoint.host))
+                }
+                it.startHandshake()
+                if (!HttpsURLConnection.getDefaultHostnameVerifier().verify(endpoint.host, it.session)) {
+                    throw SSLPeerUnverifiedException(
+                        "Сертификат HTTPS health endpoint не соответствует имени.",
+                    )
+                }
+                val path = buildString {
+                    append(url.path.ifBlank { "/" })
+                    url.query?.let { query -> append('?').append(query) }
+                }
+                val output = BufferedOutputStream(it.outputStream)
+                output.write(
+                    (
+                        "GET $path HTTP/1.1\r\n" +
+                            "Host: ${endpoint.host}\r\n" +
+                            "User-Agent: ZapretKVN-health\r\n" +
+                            "Accept: */*\r\n" +
+                            "Connection: close\r\n\r\n"
+                        ).toByteArray(StandardCharsets.US_ASCII),
+                )
+                output.flush()
+                val statusLine = BufferedInputStream(it.inputStream).use(::readHttpStatusLine)
+                val status = statusLine
+                    .split(' ', limit = 3)
+                    .getOrNull(1)
+                    ?.toIntOrNull()
+                    ?: throw IOException("Некорректный HTTP status health endpoint.")
+                if (status !in HTTP_REACHABLE_STATUS_RANGE) throw UnexpectedHttpsStatus(status)
+                return status
+            }
+        } finally {
+            runCatching { plain.close() }
+        }
+    }
+
+    private fun readHttpStatusLine(input: BufferedInputStream): String {
+        val bytes = ArrayList<Byte>(64)
+        while (bytes.size < MAX_HTTP_STATUS_LINE_BYTES) {
+            val value = input.read()
+            if (value < 0 || value == '\n'.code) break
+            if (value != '\r'.code) bytes += value.toByte()
+        }
+        if (bytes.isEmpty() || bytes.size >= MAX_HTTP_STATUS_LINE_BYTES) {
+            throw IOException("Некорректная строка HTTP status health endpoint.")
+        }
+        return bytes.toByteArray().toString(StandardCharsets.US_ASCII)
     }
 
     private fun httpsFailureReason(error: Throwable): String {
@@ -446,6 +556,7 @@ class VpnHealthPipeline(
     private data class HttpsProbeResult(
         val endpoint: ManagedHealthEndpoint,
         val status: Int,
+        val addressFamily: ProxyIpFamily,
     )
 
     private class HttpsProbeFailure(
@@ -455,6 +566,28 @@ class VpnHealthPipeline(
     ) : IOException(message, cause)
 
     private class UnexpectedHttpsStatus(val status: Int) : IOException()
+
+    private class VpnHealthAddressFamilyException(
+        private val requiredFamily: ProxyIpFamily,
+        endpointCode: String,
+        answerCount: Int,
+    ) : IOException(), CodedFailure {
+        override val failureCode = "VPN-201"
+        override val userMessage = when (requiredFamily) {
+            ProxyIpFamily.Ipv4Only ->
+                "HTTPS-проверка: WireGuard-профиль поддерживает только IPv4, " +
+                    "но проверочный узел не вернул IPv4-адрес."
+            ProxyIpFamily.Ipv6Only ->
+                "HTTPS-проверка: WireGuard-профиль поддерживает только IPv6, " +
+                    "но проверочный узел не вернул IPv6-адрес."
+            else -> "HTTPS-проверка: IP-семейство WireGuard несовместимо с проверочным узлом."
+        }
+        override val technicalDetail =
+            "health_family=${requiredFamily.diagnosticName} endpoint=$endpointCode answers=$answerCount"
+
+        override val message: String
+            get() = userMessage
+    }
 
     private fun dnsQuery(hostname: String): ByteArray {
         val id = ThreadLocalRandom.current().nextInt(0x10000)
@@ -486,7 +619,27 @@ class VpnHealthPipeline(
         const val DNS_TIMEOUT_MILLIS = 2_500
         const val HTTPS_ENDPOINT_TIMEOUT_MILLIS = 4_000
         const val MAX_HTTPS_FAILURE_DETAIL_CHARS = 240
+        const val MAX_HTTP_STATUS_LINE_BYTES = 512
         const val MAX_DNS_PACKET = 65_535
         val HTTP_REACHABLE_STATUS_RANGE = 200..599
     }
+}
+
+private val ProxyIpFamily.diagnosticName: String
+    get() = when (this) {
+        ProxyIpFamily.Ipv4Only -> "ipv4"
+        ProxyIpFamily.Ipv6Only -> "ipv6"
+        ProxyIpFamily.DualStack -> "dual"
+        ProxyIpFamily.Unspecified -> "resolver"
+    }
+
+internal fun selectHealthAddress(
+    addresses: List<InetAddress>,
+    family: ProxyIpFamily,
+): InetAddress? = when (family) {
+    ProxyIpFamily.Ipv4Only -> addresses.firstOrNull { it is Inet4Address }
+    ProxyIpFamily.Ipv6Only -> addresses.firstOrNull { it is Inet6Address }
+    ProxyIpFamily.DualStack,
+    ProxyIpFamily.Unspecified,
+    -> addresses.firstOrNull()
 }

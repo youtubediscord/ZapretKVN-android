@@ -24,8 +24,40 @@ data class BootstrapHostOverlay(
     val addresses: List<String>,
 )
 
+enum class ProxyIpFamily {
+    Unspecified,
+    Ipv4Only,
+    Ipv6Only,
+    DualStack,
+}
+
 object BootstrapConfig {
     fun selectedProxyTag(raw: String): String? = selectedProxyTag(JsonConfig.parse(raw) as? JsonObject ?: return null)
+
+    /**
+     * Returns an exact address-family capability only for the selected userspace
+     * WireGuard endpoint. Other outbound types keep their resolver-driven behavior.
+     */
+    fun selectedProxyIpFamily(raw: String): ProxyIpFamily {
+        val root = JsonConfig.parse(raw) as? JsonObject ?: return ProxyIpFamily.Unspecified
+        val target = target(raw) ?: return ProxyIpFamily.Unspecified
+        if (target.outboundType != "wireguard") return ProxyIpFamily.Unspecified
+        val endpoint = (root["endpoints"] as? JsonArray)
+            ?.mapNotNull { it as? JsonObject }
+            ?.firstOrNull { it.string("tag") == target.outboundTag }
+            ?: return ProxyIpFamily.Unspecified
+        val addresses = stringArray(endpoint["address"]) +
+            stringArray(endpoint["inet4_address"]) +
+            stringArray(endpoint["inet6_address"])
+        val hasIpv4 = addresses.any { value -> '.' in value.substringBefore('/') }
+        val hasIpv6 = addresses.any { value -> ':' in value.substringBefore('/') }
+        return when {
+            hasIpv4 && hasIpv6 -> ProxyIpFamily.DualStack
+            hasIpv4 -> ProxyIpFamily.Ipv4Only
+            hasIpv6 -> ProxyIpFamily.Ipv6Only
+            else -> ProxyIpFamily.Unspecified
+        }
+    }
 
     fun target(raw: String): ProxyBootstrapTarget? {
         val root = JsonConfig.parse(raw) as? JsonObject ?: return null

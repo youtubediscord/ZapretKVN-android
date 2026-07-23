@@ -203,9 +203,7 @@ class ProfilesViewModel(
                     sourceDescription = SecretRedactor.redactInline(sourceUrl),
                     serverCount = candidate.serverCount(),
                     serverLabels = candidate.serverLabels(),
-                    activityWarning = ImportedConfigActivityScanner.warning(
-                        ImportedConfigActivityScanner.scan(update.json),
-                    ),
+                    activityWarning = importWarnings(update.json),
                     appendTargets = emptyList(),
                     refreshProfileId = profileId,
                     refreshProfileName = stored.metadata.name,
@@ -503,9 +501,7 @@ class ProfilesViewModel(
                     sourceDescription = sourceDescription,
                     serverCount = candidate.serverCount(),
                     serverLabels = candidate.serverLabels(),
-                    activityWarning = ImportedConfigActivityScanner.warning(
-                        ImportedConfigActivityScanner.scan(json),
-                    ),
+                    activityWarning = importWarnings(json),
                     appendTargets = appendTargets,
                     candidate = candidate,
                     preparedJson = json,
@@ -515,6 +511,12 @@ class ProfilesViewModel(
             )
         }
     }
+
+    private fun importWarnings(json: String): String? = buildList {
+        ImportedConfigActivityScanner.warning(ImportedConfigActivityScanner.scan(json))
+            ?.let(::add)
+        addAll(ConfigAnalyzer.dnsWarnings(json))
+    }.takeIf(List<String>::isNotEmpty)?.joinToString("\n")
 
     private fun ImportCandidate.toJson(): String = when (this) {
         is ImportCandidate.RawJson -> json

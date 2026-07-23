@@ -60,6 +60,7 @@ import io.github.zapretkvn.android.config.DnsOverride
 import io.github.zapretkvn.android.diagnostics.DiagnosticAttemptOutcome
 import io.github.zapretkvn.android.diagnostics.DiagnosticState
 import io.github.zapretkvn.android.diagnostics.DiagnosticStageStatus
+import io.github.zapretkvn.android.diagnostics.DiagnosticStopOutcome
 import io.github.zapretkvn.android.hardening.TunMtuMode
 import io.github.zapretkvn.android.profiles.ProfilesUiState
 import io.github.zapretkvn.android.profiles.ProfilesViewModel
@@ -677,6 +678,7 @@ private fun DiagnosticsSettings(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var timelineExpanded by rememberSaveable { mutableStateOf(false) }
+    var stopTimelineExpanded by rememberSaveable { mutableStateOf(false) }
     var crashExpanded by rememberSaveable { mutableStateOf(false) }
     var logsExpanded by rememberSaveable { mutableStateOf(false) }
     var overlayExpanded by rememberSaveable { mutableStateOf(false) }
@@ -764,6 +766,77 @@ private fun DiagnosticsSettings(
                         )
                     }
                 }
+            }
+        }
+        ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier.padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text("Время остановки", style = MaterialTheme.typography.titleMedium)
+                val attempt = diagnostics.stopAttempt
+                if (attempt == null) {
+                    Text("Замеры появятся после следующей остановки VPN.")
+                } else {
+                    Text(
+                        if (attempt.outcome == DiagnosticStopOutcome.Running) {
+                            "Остановка выполняется"
+                        } else {
+                            "Остановлено за ${formatDiagnosticDuration(attempt.totalDurationMillis)}"
+                        },
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    attempt.stages.lastOrNull { it.status == DiagnosticStageStatus.Running }?.let { stage ->
+                        Text(
+                            "Сейчас: ${stage.label}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    attempt.slowestCompletedStage?.let { stage ->
+                        Text(
+                            "Самый долгий этап: ${stage.label} — ${formatDiagnosticDuration(stage.durationMillis)}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.testTag("diagnostic-stop-slowest-stage"),
+                        )
+                    }
+                    OutlinedButton(
+                        onClick = { stopTimelineExpanded = !stopTimelineExpanded },
+                        modifier = Modifier.testTag("diagnostic-stop-timeline-toggle"),
+                    ) {
+                        Text(
+                            if (stopTimelineExpanded) {
+                                "Скрыть этапы"
+                            } else {
+                                "Показать этапы (${attempt.stages.size})"
+                            },
+                        )
+                    }
+                    if (stopTimelineExpanded) {
+                        Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                            attempt.stages.forEach { stage ->
+                                Text(
+                                    "${stage.status.symbol()} ${stage.label} — " +
+                                        (stage.durationMillis?.let(::formatDiagnosticDuration)
+                                            ?: "выполняется") +
+                                        (stage.detail?.let { " · $it" } ?: ""),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = if (stage.status == DiagnosticStageStatus.Failed) {
+                                        MaterialTheme.colorScheme.error
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                    },
+                                )
+                            }
+                        }
+                    }
+                }
+                Text(
+                    "TUN закрывается до клиентов и libbox; каждый этап измеряется отдельно.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
         ElevatedCard(modifier = Modifier.fillMaxWidth()) {

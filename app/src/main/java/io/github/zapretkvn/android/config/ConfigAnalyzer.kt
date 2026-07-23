@@ -37,6 +37,61 @@ object ConfigAnalyzer {
         final == null || final in servers
     }.getOrDefault(false)
 
+    /**
+     * Reports DNS servers that are present but unreachable from final/rules.
+     * This is diagnostic only: user-authored JSON is never normalized here.
+     */
+    fun dnsWarnings(raw: String): List<String> = runCatching {
+        val root = JsonConfig.parse(raw) as? JsonObject ?: return@runCatching emptyList()
+        val dns = root["dns"] as? JsonObject ?: return@runCatching emptyList()
+        val servers = (dns["servers"] as? JsonArray)
+            ?.mapNotNull { it as? JsonObject }
+            .orEmpty()
+        if (servers.size < 2) return@runCatching emptyList()
+        val byTag = servers.mapNotNull { server ->
+            server.string("tag")?.let { tag -> tag to server }
+        }.toMap()
+        val referenced = mutableSetOf<String>()
+        dns.string("final")?.let(referenced::add)
+        (dns["rules"] as? JsonArray).orEmpty()
+            .mapNotNull { it as? JsonObject }
+            .mapNotNull { it.string("server") }
+            .forEach(referenced::add)
+        (root["route"] as? JsonObject)
+            ?.string("default_domain_resolver")
+            ?.let(referenced::add)
+        (root["outbounds"] as? JsonArray).orEmpty()
+            .mapNotNull { it as? JsonObject }
+            .mapNotNull { it.string("domain_resolver") }
+            .forEach(referenced::add)
+        (root["endpoints"] as? JsonArray).orEmpty()
+            .mapNotNull { it as? JsonObject }
+            .mapNotNull { it.string("domain_resolver") }
+            .forEach(referenced::add)
+        servers.mapNotNull { it.string("domain_resolver") }
+            .forEach(referenced::add)
+
+        val queue = ArrayDeque(referenced)
+        while (queue.isNotEmpty()) {
+            val server = byTag[queue.removeFirst()] ?: continue
+            val children = (server["servers"] as? JsonArray)
+                ?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
+                .orEmpty()
+            children.forEach { child ->
+                if (referenced.add(child)) queue.addLast(child)
+            }
+        }
+        val unusedCount = byTag.keys.count { it !in referenced }
+        if (unusedCount == 0) {
+            emptyList()
+        } else {
+            listOf(
+                "DNS профиля: $unusedCount сервер(а) не используются final/rules и " +
+                    "не являются fallback; резервными автоматически они не станут.",
+            )
+        }
+    }.getOrDefault(emptyList())
+
     fun selectorGroups(raw: String): List<SelectorGroup> = selectorGroups(JsonConfig.parse(raw))
 
     fun selectorGroups(root: JsonElement): List<SelectorGroup> {
