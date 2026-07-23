@@ -4,7 +4,7 @@
 
 | Поле | Значение |
 |---|---|
-| Статус | Этапы 0–7, постоянная подпись, GitHub prerelease и automated Gate 8 готовы; физическая матрица и две офлайн-копии ключа остаются открыты |
+| Статус | Stable `v0.2.1`, этапы 0–7 и automated Gate 8 готовы; физическая матрица и две офлайн-копии ключа остаются открыты |
 | Текущий этап | Этап 8: обязательная выпускная матрица |
 | Минимальная ОС | Android 8.0, API 26 |
 | Устройства MVP | Телефоны |
@@ -431,8 +431,8 @@ Release workflow принимает строгие tags `vMAJOR.MINOR.PATCH` и 
 детерминированный монотонный versionCode, собирает exact pinned core, тестирует, подписывает
 отдельные arm64-v8a/armeabi-v7a/x86_64 APK секретами environment `release`, проверяет
 `apksigner`/manifest/единственность ABI и публикует APK, SHA-256, metadata и notes один раз без замены уже опубликованных assets. Локальная сборка
-этого bundle пройдена с постоянным production-ключом; опубликован prerelease
-`v0.2.1-beta.30` с тремя ABI, checksum и metadata.
+этого bundle пройдена с постоянным production-ключом; опубликованы prerelease
+`v0.2.1-beta.30` и stable `v0.2.1` с тремя ABI, checksum и metadata.
 
 Постоянный ключ создан, проверен и добавлен владельцем в GitHub Secrets; workflow и
 [инструкция](SIGNING.md) готовы. `I7-07` остаётся открытым только до подтверждения двух
@@ -450,8 +450,9 @@ Release workflow принимает строгие tags `vMAJOR.MINOR.PATCH` и 
 до 701002 и подтвердил сохранность. Затем Android отклонил downgrade и переподписанный
 другим ключом APK как `VERSION_DOWNGRADE`/`UPDATE_INCOMPATIBLE`, не повредив данные.
 Unit/instrumented тесты отдельно проверяют rotation lineage, multi-signer, package/version,
-неверный checksum, прерванный `.part`, installer cancel и startup cleanup. Публичный
-prerelease `v0.2.1-beta.30` содержит три ABI, отдельные SHA-256 и обе metadata-схемы.
+неверный checksum, прерванный `.part`, installer cancel и startup cleanup. Публичные
+`v0.2.1-beta.30` и stable `v0.2.1` содержат три ABI, отдельные SHA-256 и обе
+metadata-схемы.
 
 ## Этап 8 — обязательная выпускная матрица
 
@@ -526,13 +527,13 @@ production default по AVD-данным не изменён.
   Zapret KVN и median 0 TUN bytes (единственный интерфейсный шум — 96 bytes).
 - [x] Все известные ограничения синхронно перечислены в UI, README и генерируемых
   release notes; это проверяет `scripts/verify-project.sh`.
-- [ ] После прохождения gate опубликован первый production GitHub Release. Тестовые debug
-  pre-release не закрывают этот пункт.
+- [ ] После прохождения gate опубликован первый production GitHub Release. Stable
+  `v0.2.1` опубликован 23 июля 2026 года по явному решению владельца до завершения
+  физической матрицы; публикация не закрывает сам gate задним числом.
 
-Публичный gate пока намеренно не закрыт: обязательны production signing key, реальный
-arm64 RC и незавершённая физическая матрица из `GATE8_RESULTS.md`. GitHub-репозиторий
-`youtubediscord/ZapretKVN-android` уже выбран; внешний CI остаётся закрыть зелёным прогоном
-текущего commit.
+Публичный stable доступен, но финальный gate остаётся открытым: обязательны проверка
+production-signed arm64 APK на реальном устройстве и незавершённая физическая матрица
+из `GATE8_RESULTS.md`. Постоянный ключ, exact core, локальный release audit и CI готовы.
 
 ## После MVP — только по измерениям и запросам пользователей
 

@@ -8,9 +8,11 @@ Zapret KVN — быстрый и бережный Android-клиент для `s
 
 По умолчанию выбранные приложения используют режим «Россия напрямую»: российские домены и IP, а также LAN идут через прямую сеть Android, остальное — через VPN. Так VPN-сервер не тратит ресурсы на доступные без обхода сайты.
 
-> **Сейчас проект находится на стадии pre-release.** Целевой ориентир — подтверждённое подключение за 1–2 секунды на реальных устройствах. Это цель финального performance-gate, а не обещание для текущих тестовых сборок.
+> **Первый stable `0.2.1` опубликован.** Физическая матрица слабых устройств,
+> IPv6/NAT64, операторов и энергии продолжается; целевые 1–2 секунды подключения
+> остаются целью performance-gate, а не обещанием для каждой сети и конфигурации.
 
-[Скачать тестовую сборку](https://github.com/youtubediscord/ZapretKVN-android/releases) · [Посмотреть архитектуру](ARCHITECTURE.md) · [Изучить маршрутизацию](ROUTING_ARCHITECTURE.md)
+[Скачать stable 0.2.1](https://github.com/youtubediscord/ZapretKVN-android/releases/tag/v0.2.1) · [Посмотреть архитектуру](ARCHITECTURE.md) · [Изучить маршрутизацию](ROUTING_ARCHITECTURE.md)
 
 ## Минимализм в чистом виде
 
@@ -92,9 +94,13 @@ Android всё равно показывает системный `VpnService`, 
 
 Настоящий sing-box JSON остаётся единственным источником сетевой конфигурации: Zapret KVN не создаёт скрытую копию правил и не теряет незнакомые extended-поля.
 
-## Тестовые сборки
+## Сборки
 
-Ручные debug-сборки публикуются в [GitHub Releases](https://github.com/youtubediscord/ZapretKVN-android/releases) как pre-release. Они используют package `io.github.zapretkvn.android.debug` и Android debug key, поэтому могут стоять рядом с будущей production-версией.
+Stable-сборки используют package `io.github.zapretkvn.android` и постоянный production
+key. `0.2.1` обновляет `0.2.1-beta.30` без потери app-private данных. Ручные
+debug-сборки публикуются в [GitHub Releases](https://github.com/youtubediscord/ZapretKVN-android/releases)
+как prerelease; у них отдельный package `io.github.zapretkvn.android.debug` и Android
+debug key, поэтому они устанавливаются рядом и не обновляют production-приложение.
 
 При ошибке главная сразу показывает стабильный код вида `DNS-101` или `NET-102` и понятное описание. В «Настройки → Диагностика» видны этот же код, безопасная техническая причина, длительности этапов, bounded-логи и последний Kotlin/Java crash. Кнопка «Экспортировать диагностику» вверху экрана формирует redacted-отчёт без профиля и credentials.
 
