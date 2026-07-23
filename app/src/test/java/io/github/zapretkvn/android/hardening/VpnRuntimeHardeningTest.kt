@@ -90,7 +90,7 @@ class VpnRuntimeHardeningTest {
     }
 
     @Test
-    fun `normalized mtu preserves profile or core value for userspace wireguard`() {
+    fun `normalized mtu clamps tun to userspace wireguard endpoint`() {
         val source = root(
             rootExtra = """
                 ,"endpoints":[{"type":"wireguard","tag":"wg","mtu":1280}]
@@ -101,8 +101,27 @@ class VpnRuntimeHardeningTest {
             as RuntimeHardeningResult.Ready
         val tun = (result.root["inbounds"] as JsonArray).single() as JsonObject
 
-        assertFalse("runtime TUN must keep the core default", "mtu" in tun)
+        assertEquals("1280", (tun["mtu"] as JsonPrimitive).content)
         assertFalse("stored profile must remain untouched", "\"mtu\":1500" in source.toString())
+    }
+
+    @Test
+    fun `normalized mtu uses smallest userspace wireguard endpoint`() {
+        val source = root(
+            rootExtra = """
+                ,"endpoints":[
+                  {"type":"wireguard","tag":"wg-a","mtu":1408},
+                  {"type":"wireguard","tag":"wg-b","mtu":1280},
+                  {"type":"wireguard","tag":"wg-system","system":true,"mtu":1200}
+                ]
+            """.trimIndent(),
+        )
+
+        val result = VpnRuntimeHardening.apply(source, VpnHidingOptions())
+            as RuntimeHardeningResult.Ready
+        val tun = (result.root["inbounds"] as JsonArray).single() as JsonObject
+
+        assertEquals("1280", (tun["mtu"] as JsonPrimitive).content)
     }
 
     @Test

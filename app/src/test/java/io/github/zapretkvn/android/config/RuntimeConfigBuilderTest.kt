@@ -86,9 +86,80 @@ class RuntimeConfigBuilderTest {
         assertEquals("1376", (endpoints[1]["mtu"] as JsonPrimitive).content)
         assertEquals("custom-direct", endpoints[1].string("detour"))
         assertFalse("mtu" in endpoints[2])
-        assertFalse("userspace WireGuard must keep the TUN core default", "mtu" in tun)
+        assertEquals("1280", (tun["mtu"] as JsonPrimitive).content)
         assertFalse("stored profile must stay untouched", "1280" in stored)
         assertFalse("stored profile must not gain a detour", "zapret-wireguard-direct" in stored)
+    }
+
+    @Test
+    fun `wireguard clamps Android tun mtu in every DNS mode`() {
+        val stored = validConfig(
+            rootExtra = """
+                ,"endpoints":[
+                  {"type":"wireguard","tag":"wg","mtu":1280,"address":["10.0.0.2/32"],
+                   "private_key":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+                   "peers":[{"address":"192.0.2.1","port":51820,
+                             "public_key":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+                             "allowed_ips":["0.0.0.0/0"]}]}
+                ]
+            """.trimIndent(),
+        )
+
+        DnsMode.entries.forEach { mode ->
+            val result = RuntimeConfigBuilder.build(
+                stored,
+                options = RuntimeConfigOptions(
+                    dnsMode = mode,
+                    vpnHiding = VpnHidingOptions(tunMtuMode = TunMtuMode.Normalize1500),
+                ),
+            ) as RuntimeConfigResult.Ready
+            val root = JsonConfig.parse(result.json) as JsonObject
+            val tun = (root["inbounds"] as JsonArray).single() as JsonObject
+
+            assertEquals("DNS mode $mode", "1280", (tun["mtu"] as JsonPrimitive).content)
+        }
+    }
+
+    @Test
+    fun `wireguard profile mode preserves explicit tun mtu`() {
+        val stored = validConfig(
+            tunExtra = ""","mtu":1420""",
+            rootExtra = """
+                ,"endpoints":[{"type":"wireguard","tag":"wg","mtu":1280}]
+            """.trimIndent(),
+        )
+        val result = RuntimeConfigBuilder.build(
+            stored,
+            options = RuntimeConfigOptions(
+                vpnHiding = VpnHidingOptions(tunMtuMode = TunMtuMode.CoreDefault),
+            ),
+        ) as RuntimeConfigResult.Ready
+        val root = JsonConfig.parse(result.json) as JsonObject
+        val tun = (root["inbounds"] as JsonArray).single() as JsonObject
+
+        assertEquals("1420", (tun["mtu"] as JsonPrimitive).content)
+    }
+
+    @Test
+    fun `wireguard profile mode derives tun mtu when profile omitted it`() {
+        val stored = validConfig(
+            rootExtra = """
+                ,"endpoints":[{"type":"wireguard","tag":"wg","mtu":1280}]
+            """.trimIndent(),
+        )
+        val result = RuntimeConfigBuilder.build(
+            stored,
+            options = RuntimeConfigOptions(
+                vpnHiding = VpnHidingOptions(tunMtuMode = TunMtuMode.CoreDefault),
+            ),
+        ) as RuntimeConfigResult.Ready
+        val root = JsonConfig.parse(result.json) as JsonObject
+        val tun = (root["inbounds"] as JsonArray).single() as JsonObject
+        val storedRoot = JsonConfig.parse(stored) as JsonObject
+        val storedTun = (storedRoot["inbounds"] as JsonArray).single() as JsonObject
+
+        assertEquals("1280", (tun["mtu"] as JsonPrimitive).content)
+        assertFalse("stored profile must not gain a TUN MTU", "mtu" in storedTun)
     }
 
     @Test

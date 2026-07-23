@@ -385,7 +385,7 @@ Auto/Secure не запускаются при strict Private DNS, потому 
 | Три DoH параллельно | Только последний Auto-этап или явный Secure: exact core с `sequential` не достигает резерва, если первый DoH занял общий deadline; на успешных profile/Android-этапах DoH-запросов нет |
 | Отдельный VPN-процесс | Отклонён до профилирования: добавляет IPC/process overhead и усложняет lifecycle |
 
-Pinned Android AAR собирается с `with_gvisor`. Для managed TUN поле `stack` не переопределяем: exact core выбирает upstream default `mixed`. Runtime по умолчанию нормализует TUN MTU до `1500`, поскольку первоначальная проверка на реальном устройстве показала меньшую задержку относительно Android-specific core default `9000`; последующий видеотест дал одинаковое зависание при `1500` и `9000`, поэтому MTU не считается причиной этой неисправности и остаётся явно переключаемой настройкой до полной физической матрицы.
+Pinned Android AAR собирается с `with_gvisor`. Для managed TUN поле `stack` не переопределяем: exact core выбирает upstream default `mixed`. Exact pinned core при пустом `tun.mtu` выбирает на Android `9000`, а userspace WireGuard — собственный меньший MTU. Поэтому стандартный runtime задаёт внешний TUN явно: `1500` для остальных профилей и `min(1500, effective userspace WireGuard endpoint MTU)` для конфигураций с userspace WireGuard. Endpoint без MTU получает Android fallback `1280`; это совпадает с default официального AmneziaWG Android. Режим «По профилю» сохраняет явно заданный TUN MTU, но при отсутствии поля также использует MTU userspace WireGuard endpoint и не возвращается к несовместимому 9000. Stored JSON не меняется. Исправление основано на системном logcat stable 0.2.3, где фактический Android TUN был `9000` при endpoint `1280`; окончательный физический A/B `1280 ↔ 9000` остаётся обязательным.
 
 Runtime-копия каждого профиля, включая raw JSON и endpoint-only WireGuard/AWG, всегда получает `log.level=warn`; явно более строгие `error`, `fatal` и `panic` сохраняются. `trace`, `debug`, `info`, `notice` и отсутствие уровня ограничиваются до `warn`, а `log.output` удаляется. Это обязательно, потому что exact core при отсутствующем `log.level` выбирает `trace`, что создаёт ненужную работу на data-plane. Сохранённый JSON не переписывается.
 
@@ -615,7 +615,7 @@ Gate: APK не выпускается при failed fixture, instrumented test, 
 - 7/7 JSON приняты CLI, собранным из точного commit;
 - 7/7 приняты compatibility release CLI;
 - [Android WireGuard ClientBind fixture](testdata/routing/wireguard-android-client-bind.json),
-  SHA-256 `8e37bca042305e582240cb1614853beceb12a09b49048e560bd540b9f01ac1d8`,
+  SHA-256 `822dcc9c6a138418b8adc51be44260ac3ff0dceb10187506e1506a5c710974c7`,
   фиксирует Android WireGuard endpoint, health-route и раздельные TUN/endpoint MTU;
 - `go test ./dns/... ./route/rule ./experimental/libbox` проходит; наш воспроизводимый audit test дополнительно проверяет exact pinned fallback success/error/hang/RCODE внутри исходного Go package;
 - Gradle-проект с направленными library-модулями собирает одно-ABI debug и R8 release-матрицу; каждый APK содержит ровно один ABI, один process и один `VpnService`;
@@ -643,7 +643,7 @@ Gate: APK не выпускается при failed fixture, instrumented test, 
 |---|---|---|---|
 | P1 | Реальная per-app изоляция на всех целевых API/OEM | API 26, 28, 29 и актуальный Android: выбранное приложение видно в TUN, невыбранное не видно; отдельно shared UID, удаление package во время запуска, Always-on/Lockdown | Использовать include allowlist; при пустом/ошибочном списке не запускаться |
 | P2 | Какой userspace stack быстрее именно на наших устройствах | Одинаковые TCP/UDP/QUIC сценарии для `mixed` и `system`: throughput, CPU, RAM, connect time, потери и стабильность на Wi‑Fi/mobile | Оставить поле `stack` пустым, то есть upstream `mixed`; не показывать выбор в обычном GUI |
-| P3 | Отсутствие OEM/операторских проблем у default `1500` | Проверить IPv4, IPv6, NAT64, QUIC, крупные загрузки, PMTU/fragmentation и смену Wi‑Fi/mobile; сравнить с profile/core | Оставить 1500 с явным откатом в GUI; вернуть global default только при воспроизводимой регрессии |
+| P3 | Отсутствие OEM/операторских проблем у default `1500`, а для userspace WireGuard — `min(1500, endpoint MTU)` | Проверить IPv4, IPv6, NAT64, QUIC, крупные загрузки, PMTU/fragmentation и смену Wi‑Fi/mobile; отдельно A/B WireGuard 1280 ↔ core 9000 | Оставить вычисляемый runtime MTU с явным откатом «По профилю»; менять только по воспроизводимой регрессии |
 | P4 | Цена безусловного Android owner/process lookup в pinned core | Профилирование connect latency, CPU и throughput с текущим core; отдельная экспериментальная сборка без lookup допустима только для сравнения | Не форкать ядро. Patch рассматривается лишь при повторяемом существенном выигрыше и полном повторе матрицы |
 | P5 | Реальное поведение DNS на Android/OEM | Private DNS off/automatic/strict working/broken, captive portal, заблокированный system DNS, DoH через proxy, port-53 hijack, DNS/HTTPS health-check | Следовать fail-close DNS ADR; системные настройки не менять и strict Private DNS скрыто не обходить |
 | P6 | Сетевой lifecycle без гонок | Wi‑Fi ↔ mobile, потеря underlying network, быстрые callback bursts, reconnect 8–10 секунд, LKG fresh/stale, revoke, kill process и повторный старт | Один generation token, один service-lock и идемпотентный stop |

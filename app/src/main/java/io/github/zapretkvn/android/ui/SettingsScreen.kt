@@ -1363,10 +1363,11 @@ private fun TunMtuMode.displayName(): String = when (this) {
 
 private fun TunMtuMode.description(): String = when (this) {
     TunMtuMode.CoreDefault ->
-        "Используется MTU профиля или Android-default ядра. Выберите при проблемах совместимости."
+        "Используется MTU профиля; для WireGuard без tun.mtu — MTU endpoint, " +
+            "для остальных — Android-default ядра."
     TunMtuMode.Normalize1500 ->
         "Используется по умолчанию: runtime ограничивает TUN до MTU 1500. " +
-            "Для userspace WireGuard сохраняется MTU профиля/ядра. JSON не меняется."
+            "Для userspace WireGuard выбирается меньшее из 1500 и MTU endpoint. JSON не меняется."
 }
 
 private fun VpnConnectionState.diagnosticLabel(): String = when (this) {

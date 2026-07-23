@@ -78,11 +78,14 @@ object RuntimeConfigBuilder {
         } catch (_: Exception) {
             return invalid("JSON содержит синтаксическую ошибку.")
         }
-        val hardenedRoot = when (val hardened = VpnRuntimeHardening.apply(storedRoot, options.vpnHiding)) {
+        // Materialize Android endpoint defaults before hardening so the outer
+        // TUN can be clamped to the effective userspace WireGuard MTU.
+        val compatibleRoot = applyAndroidWireGuardCompatibility(storedRoot)
+        val hardenedRoot = when (val hardened = VpnRuntimeHardening.apply(compatibleRoot, options.vpnHiding)) {
             is RuntimeHardeningResult.Ready -> hardened.root
             is RuntimeHardeningResult.Blocked -> return invalid(hardened.message)
         }
-        val root = applyAndroidWireGuardCompatibility(hardenedRoot)
+        val root = hardenedRoot
 
         findForbiddenField(root)?.let { field ->
             return invalid("Поле '$field' несовместимо с Android VPN и запрещено в MVP.")

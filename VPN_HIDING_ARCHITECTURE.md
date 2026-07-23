@@ -31,7 +31,7 @@ control endpoint и effective MTU.
 |---|---:|---|
 | Блокировать localhost endpoints | on | Удаляет сетевые поля Clash API и `v2ray_api`; любой дополнительный non-TUN inbound блокирует запуск |
 | Нейтральное имя VPN-сессии | off | Передаёт Android строку `Системная сеть` вместо `Zapret KVN`; package/VpnService это не скрывает |
-| MTU TUN | `1500` | Runtime-копия обычных proxy-профилей; userspace WireGuard сохраняет core/profile MTU |
+| MTU TUN | `min(1500, WireGuard endpoint MTU)` | Runtime-копия; без userspace WireGuard остаётся 1500, stored JSON не меняется |
 
 Managed-профили не открывают внешний Clash controller независимо от пользовательского
 переключателя. Отключение localhost-защиты существует только для осознанной

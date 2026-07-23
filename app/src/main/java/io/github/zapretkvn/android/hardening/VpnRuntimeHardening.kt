@@ -5,6 +5,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.intOrNull
 
 enum class TunMtuMode {
     CoreDefault,
@@ -45,12 +46,14 @@ object VpnRuntimeHardening {
         if (options.blockLocalEndpoints) {
             hardened = removeLocalControlEndpoints(hardened)
         }
-        if (
-            options.tunMtuMode == TunMtuMode.Normalize1500 &&
-            !hasUserspaceWireGuard(hardened)
-        ) {
-            hardened = replaceTunMtu(hardened, NORMALIZED_MTU)
+        val wireGuardMtu = minimumUserspaceWireGuardMtu(hardened)
+        val runtimeTunMtu = when {
+            options.tunMtuMode == TunMtuMode.Normalize1500 ->
+                wireGuardMtu?.coerceAtMost(NORMALIZED_MTU) ?: NORMALIZED_MTU
+            wireGuardMtu != null && !hasExplicitTunMtu(hardened) -> wireGuardMtu
+            else -> null
         }
+        if (runtimeTunMtu != null) hardened = replaceTunMtu(hardened, runtimeTunMtu)
         return RuntimeHardeningResult.Ready(hardened)
     }
 
@@ -98,22 +101,39 @@ object VpnRuntimeHardening {
     }
 
     /**
-     * The Android TUN and the inner userspace WireGuard endpoint are separate packet
-     * planes. Physical-device A/B showed that forcing the outer TUN to 1500 while the
-     * inner endpoint uses 1280 can pass handshakes and small DNS packets but black-hole
-     * TCP/TLS. Preserve the profile/core TUN MTU for userspace WireGuard; the stored
-     * JSON is never changed.
+     * The Android TUN and an inner userspace WireGuard endpoint are separate packet
+     * planes, but the outer interface must not admit packets larger than the inner
+     * endpoint can carry. Otherwise handshakes and small DNS packets can pass while
+     * TCP/TLS stalls. RuntimeConfigBuilder materializes the endpoint default before
+     * calling this function; the stored JSON is never changed.
      */
-    private fun hasUserspaceWireGuard(root: JsonObject): Boolean =
+    private fun minimumUserspaceWireGuardMtu(root: JsonObject): Int? =
         (root["endpoints"] as? JsonArray)
             ?.mapNotNull { it as? JsonObject }
-            ?.any { endpoint ->
+            ?.filter { endpoint ->
                 endpoint.string("type") == "wireguard" &&
                     (endpoint["system"] as? JsonPrimitive)?.booleanOrNull != true
+            }
+            ?.mapNotNull { endpoint ->
+                (endpoint["mtu"] as? JsonPrimitive)
+                    ?.intOrNull
+                    ?.takeIf { it in MIN_WIREGUARD_MTU..MAX_WIREGUARD_MTU }
+            }
+            ?.minOrNull()
+
+    private fun hasExplicitTunMtu(root: JsonObject): Boolean =
+        (root["inbounds"] as? JsonArray)
+            ?.mapNotNull { it as? JsonObject }
+            ?.any { inbound ->
+                inbound.string("type") == "tun" &&
+                    (inbound["mtu"] as? JsonPrimitive)?.intOrNull != null
             } == true
 
     private fun JsonObject.string(key: String): String? =
         (this[key] as? JsonPrimitive)?.contentOrNull
+
+    private const val MIN_WIREGUARD_MTU = 1280
+    private const val MAX_WIREGUARD_MTU = 9000
 
     private val CLASH_LISTENER_FIELDS = setOf(
         "external_controller",

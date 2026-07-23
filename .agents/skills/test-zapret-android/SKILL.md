@@ -243,12 +243,14 @@ MTU, device and network; the patch is implemented but its causal effect is not p
 until the physical A/B succeeds.
 
 For userspace WireGuard, also inspect `wireguard_client_bind_detour_count`, peer
-count, local address families, default IPv4/IPv6 AllowedIPs and inner MTU in the
-effective overlay. The pinned sing-box standard bind enables Android GRO and can
-show a successful handshake followed by no or extremely slow return data. Zapret KVN
-adds a runtime-only direct detour to endpoints without an explicit detour so the core
-uses `ClientBind`; a user-supplied detour remains untouched. A handshake response
-proves only the outer UDP/key path, not usable inner TCP/UDP traffic.
+count, local address families, default IPv4/IPv6 AllowedIPs, effective Android TUN
+MTU and inner endpoint MTU. The pinned core defaults an unspecified Android TUN to
+9000. In the normal Zapret KVN mode a userspace WireGuard profile must instead report
+`tun_mtu=min(1500, minimum endpoint MTU)`; an endpoint without MTU receives 1280.
+The Android WireGuard patch uses the protected sing-box dialer directly and must not
+add a synthetic outbound detour. A handshake response proves only the outer UDP/key
+path, not usable inner TCP/UDP traffic. If small DNS succeeds but HTTPS stalls, verify
+the actual TUN MTU in unfiltered `ConnectivityService`/`Vpn` logcat before changing DNS.
 
 For routing/per-app failures, also record the selected package, include/exclude mode, whether the control app was selected, and IPv4/IPv6/TCP/UDP/QUIC result without including credentials.
 
