@@ -53,6 +53,7 @@ data class RuntimeConfigOptions(
     val dnsOverride: DnsOverride = DnsOverride(),
     val bootstrapHost: BootstrapHostOverlay? = null,
     val vpnHiding: VpnHidingOptions = VpnHidingOptions(),
+    val healthCheckPackageName: String? = null,
     val updaterPackageName: String? = null,
 )
 
@@ -145,6 +146,11 @@ object RuntimeConfigBuilder {
         if (options.updaterPackageName != null && !ANDROID_PACKAGE.matches(options.updaterPackageName)) {
             return invalid("Некорректный Android package временного updater-маршрута.")
         }
+        if (options.healthCheckPackageName != null &&
+            !ANDROID_PACKAGE.matches(options.healthCheckPackageName)
+        ) {
+            return invalid("Некорректный Android package health-check.")
+        }
         if (options.dnsMode in MANAGED_DNS_MODES && hasFakeIp(root)) {
             return invalid("FakeIP найден в JSON. Для него выберите режим «Из JSON».")
         }
@@ -192,6 +198,7 @@ object RuntimeConfigBuilder {
             dnsOverride = options.dnsOverride,
             selectedProxyTag = selectedProxyTag,
             bootstrapHost = options.bootstrapHost,
+            healthCheckPackageName = options.healthCheckPackageName,
         )
         if (dnsOverlay is RuntimeConfigResult.Invalid) return dnsOverlay
         val runtime = (dnsOverlay as RuntimeConfigResult.Ready).json
@@ -248,6 +255,7 @@ object RuntimeConfigBuilder {
         dnsOverride: DnsOverride,
         selectedProxyTag: String?,
         bootstrapHost: BootstrapHostOverlay?,
+        healthCheckPackageName: String?,
     ): RuntimeConfigResult {
         val next = root.toMutableMap()
         var dns = (root["dns"] as? JsonObject)?.toMutableMap() ?: mutableMapOf()
@@ -348,7 +356,10 @@ object RuntimeConfigBuilder {
             }
             val generatedRouteRules = buildList {
                 if (mode in MANAGED_DNS_MODES || fromJsonNeedsAndroidFallback) add(hijackDnsRule())
-                selectedProxyTag?.let { add(healthProbeRule(it)) }
+                selectedProxyTag?.let { proxyTag ->
+                    healthCheckPackageName?.let { add(healthProbeSniffRule(it)) }
+                    add(healthProbeRule(proxyTag, healthCheckPackageName))
+                }
             }
             route["rules"] = JsonArray(generatedRouteRules + existing)
             if (mode in MANAGED_DNS_MODES || fromJsonNeedsAndroidFallback) {
@@ -561,7 +572,24 @@ object RuntimeConfigBuilder {
         put("action", "hijack-dns")
     }
 
-    private fun healthProbeRule(proxyTag: String): JsonObject = buildJsonObject {
+    /**
+     * Sniff only this application's short-lived TLS health probe. This makes the
+     * following domain rule authoritative even for raw JSON without DNS reverse
+     * mapping, without enabling global sniffing for selected user applications.
+     */
+    private fun healthProbeSniffRule(packageName: String): JsonObject = buildJsonObject {
+        put("package_name", JsonArray(listOf(JsonPrimitive(packageName))))
+        put("network", "tcp")
+        put("port", 443)
+        put("action", "sniff")
+        put("sniffer", JsonArray(listOf(JsonPrimitive("tls"))))
+        put("timeout", "2s")
+    }
+
+    private fun healthProbeRule(proxyTag: String, packageName: String?): JsonObject = buildJsonObject {
+        packageName?.let {
+            put("package_name", JsonArray(listOf(JsonPrimitive(it))))
+        }
         put(
             "domain",
             JsonArray(ManagedHealthProbe.hosts.map(::JsonPrimitive)),

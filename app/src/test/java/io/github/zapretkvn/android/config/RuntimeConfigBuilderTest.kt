@@ -348,7 +348,7 @@ class RuntimeConfigBuilderTest {
     }
 
     @Test
-    fun `FromJson preserves profile DNS but always routes health through selected outbound`() {
+    fun `FromJson uses app scoped TLS sniff and routes health through selected outbound`() {
         val stored = validConfig(
             rootExtra = """
                 ,"dns":{"servers":[{"type":"udp","tag":"profile-dns","server":"192.0.2.53"}],"final":"profile-dns"}
@@ -357,7 +357,10 @@ class RuntimeConfigBuilderTest {
 
         val result = RuntimeConfigBuilder.build(
             stored,
-            options = RuntimeConfigOptions(dnsMode = DnsMode.FromJson),
+            options = RuntimeConfigOptions(
+                dnsMode = DnsMode.FromJson,
+                healthCheckPackageName = "io.github.zapretkvn.android.debug",
+            ),
         ) as RuntimeConfigResult.Ready
         val root = JsonConfig.parse(result.json) as JsonObject
         val dns = root["dns"] as JsonObject
@@ -366,8 +369,14 @@ class RuntimeConfigBuilderTest {
 
         assertEquals("profile-dns", dns.string("final"))
         assertEquals(1, (dns["servers"] as JsonArray).size)
-        assertEquals("zapret-proxy", rules.first().string("outbound"))
-        assertTrue(rules.first()["domain"].toString().contains("cp.cloudflare.com"))
+        assertEquals("sniff", rules[0].string("action"))
+        assertEquals("tcp", rules[0].string("network"))
+        assertEquals("tls", ((rules[0]["sniffer"] as JsonArray).single() as JsonPrimitive).content)
+        assertTrue(rules[0]["package_name"].toString().contains("io.github.zapretkvn.android.debug"))
+        assertEquals("zapret-proxy", rules[1].string("outbound"))
+        assertTrue(rules[1]["domain"].toString().contains("cp.cloudflare.com"))
+        assertTrue(rules[1]["package_name"].toString().contains("io.github.zapretkvn.android.debug"))
+        assertFalse("stored profile must stay untouched", "\"sniff\"" in stored)
     }
 
     @Test

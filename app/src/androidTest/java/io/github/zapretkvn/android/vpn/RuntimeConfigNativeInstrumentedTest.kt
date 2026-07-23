@@ -30,6 +30,7 @@ class RuntimeConfigNativeInstrumentedTest {
                     raw,
                     options = RuntimeConfigOptions(
                         dnsMode = mode,
+                        healthCheckPackageName = "io.github.zapretkvn.android",
                         updaterPackageName = updaterPackage,
                     ),
                 ) as RuntimeConfigResult.Ready

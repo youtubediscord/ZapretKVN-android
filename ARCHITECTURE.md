@@ -124,7 +124,7 @@ Zapret KVN — независимый нативный Android-клиент sing
 10. Создать platform adapter и локальный libbox command server в том же Android process.
 11. Вызвать `startOrReloadService()`: libbox синхронно вызывает `OpenTun(TunOptions)`, а adapter создаёт один `VpnService.Builder`, применяет приложения, адреса, полные routes и внутренний DNS.
 12. `Builder.establish()` возвращает Android PFD; libbox дублирует его FD и запускает единственный core поверх этого же TUN. Второго адаптера или второго TUN здесь нет.
-13. Для WireGuard синхронно проверить TCP+TLS именно через выбранный конкретный outbound; затем проверить DNS и HTTPS через Android TUN. В Auto подтверждённая именно DNS-ошибка полностью закрывает текущие core/PFD/callbacks и запускает следующий кандидат `профиль → Android → DoH`; максимум три попытки внутри общего deadline 45 секунд. Ошибка data-plane, JSON или HTTPS-пути не считается DNS-ошибкой и не запускает переключение.
+13. Проверить DNS и HTTPS через Android TUN. Для HTTPS runtime-копия включает TLS sniff только для package Zapret KVN и порта 443, после чего точные probe-hostnames направляются в выбранный outbound. Это доказывает настоящий путь через proxy без глобального sniff и без отдельного WireGuard-only gate. В Auto подтверждённая именно DNS-ошибка полностью закрывает текущие core/PFD/callbacks и запускает следующий кандидат `профиль → Android → DoH`; максимум три попытки внутри общего deadline 45 секунд. Ошибка data-plane, JSON или HTTPS-пути не считается DNS-ошибкой и не запускает переключение.
 14. Только после успеха показать «Подключено»; сбор 1 Hz session-only статистики начать лишь при видимой главной.
 
 Любая ошибка или revoke выполняет один идемпотентный stop: отмена callback/job, остановка core, закрытие PFD, очистка памяти, foreground stop. Терминальный `Error`/`Stopped` публикуется только после этого cleanup, чтобы немедленный повторный запуск не пересёкся со старым foreground startId на Android 8–9. Невыбранные приложения всё это время продолжают работать напрямую.
@@ -613,11 +613,11 @@ Gate: APK не выпускается при failed fixture, instrumented test, 
 - 7/7 JSON приняты CLI, собранным из точного commit;
 - 7/7 приняты compatibility release CLI;
 - [Android WireGuard ClientBind fixture](testdata/routing/wireguard-android-client-bind.json),
-  SHA-256 `0634c99586ccb5a573790ed8657a1f8bf531916b3122208cf6a0051c4fcef914`,
+  SHA-256 `8e37bca042305e582240cb1614853beceb12a09b49048e560bd540b9f01ac1d8`,
   фиксирует runtime-only direct detour и `network_strategy: default`;
 - `go test ./dns/... ./route/rule ./experimental/libbox` проходит; наш воспроизводимый audit test дополнительно проверяет exact pinned fallback success/error/hang/RCODE внутри исходного Go package;
 - Gradle-проект с направленными library-модулями собирает одно-ABI debug и R8 release-матрицу; каждый APK содержит ровно один ABI, один process и один `VpnService`;
-- 85/85 JVM unit-тестов проходят, включая DNS/routing/import/updater/signing и Always-on policy;
+- 147/147 JVM unit-тестов проходят, включая DNS/routing/import/updater/signing и Always-on policy;
 - полный текущий набор 67/67 Android instrumented-тестов проходит на AVD API 36; API 26
   прошёл предыдущую матрицу 66/66 и security delta 3/3, API 29 — 66/66; API 29/36
   дополнительно прошли 100 connect/stop и 50 Wi-Fi/cellular transitions;

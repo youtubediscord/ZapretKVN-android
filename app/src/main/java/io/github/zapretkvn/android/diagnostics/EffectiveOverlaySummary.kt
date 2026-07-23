@@ -43,7 +43,11 @@ object EffectiveOverlaySummary {
         val managedRouteRules = (route?.get("rules") as? JsonArray)
             ?.mapNotNull { it as? JsonObject }
             .orEmpty()
-            .filter(::isManagedRouteRule)
+            .filter { isManagedRouteRule(it) || isHealthProbeSniff(it) }
+        val healthProbeTlsSniffCount = (route?.get("rules") as? JsonArray)
+            ?.mapNotNull { it as? JsonObject }
+            .orEmpty()
+            .count(::isHealthProbeSniff)
         val healthProbeRouteCount = (route?.get("rules") as? JsonArray)
             ?.mapNotNull { it as? JsonObject }
             .orEmpty()
@@ -171,6 +175,7 @@ object EffectiveOverlaySummary {
                 )
                 put("route_rule_count", managedRouteRules.size)
                 put("health_probe_route_count", healthProbeRouteCount)
+                put("health_probe_tls_sniff_count", healthProbeTlsSniffCount)
                 put(
                     "route_actions",
                     JsonArray(
@@ -214,6 +219,15 @@ object EffectiveOverlaySummary {
             (rule["domain"] as? JsonArray)
                 ?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
                 ?.containsAll(HEALTH_PROBE_HOSTS) == true
+
+    private fun isHealthProbeSniff(rule: JsonObject): Boolean =
+        rule.string("action") == "sniff" &&
+            rule.string("network") == "tcp" &&
+            (rule["port"] as? JsonPrimitive)?.contentOrNull == "443" &&
+            (rule["package_name"] as? JsonArray)?.isNotEmpty() == true &&
+            (rule["sniffer"] as? JsonArray)
+                ?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
+                ?.contains("tls") == true
 
     private fun containsManagedTag(element: JsonElement): Boolean = when (element) {
         is JsonPrimitive -> element.contentOrNull?.startsWith(MANAGED_PREFIX) == true

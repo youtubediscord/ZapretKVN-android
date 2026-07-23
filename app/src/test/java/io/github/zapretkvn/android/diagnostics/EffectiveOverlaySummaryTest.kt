@@ -25,6 +25,7 @@ class EffectiveOverlaySummaryTest {
               "route":{"rules":[
                 {"domain_suffix":["private.example"],"outbound":"direct"},
                 {"protocol":"dns","action":"hijack-dns"},
+                {"package_name":["io.github.zapretkvn.android.debug"],"network":"tcp","port":443,"action":"sniff","sniffer":["tls"],"timeout":"2s"},
                 {"domain":["cp.cloudflare.com","connectivitycheck.gstatic.com","dns.opendns.com"],"action":"route","outbound":"server"},
                 {"rule_set":["zapret-ru"],"outbound":"zapret-proxy"}
               ],"rule_set":[{"tag":"zapret-ru","type":"local","format":"binary","path":"/secret/geo.srs"}]},
@@ -74,8 +75,9 @@ class EffectiveOverlaySummaryTest {
         assertEquals("1", (summary["wireguard_local_ipv4_count"] as JsonPrimitive).content)
         assertEquals("0", (summary["wireguard_local_ipv6_count"] as JsonPrimitive).content)
         assertTrue((summary["proxy_ipv4_only"] as JsonPrimitive).boolean)
-        assertEquals("2", (summary["route_rule_count"] as JsonPrimitive).content)
+        assertEquals("3", (summary["route_rule_count"] as JsonPrimitive).content)
         assertEquals("1", (summary["health_probe_route_count"] as JsonPrimitive).content)
+        assertEquals("1", (summary["health_probe_tls_sniff_count"] as JsonPrimitive).content)
         assertEquals("1", (summary["bootstrap_address_count"] as JsonPrimitive).content)
     }
 

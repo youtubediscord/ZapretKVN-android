@@ -575,7 +575,7 @@ arm64 RC и незавершённая физическая матрица из 
 - [x] Debug и R8 release APK собраны.
 - [x] Runtime smoke пройден на эмуляторах API 26 и API 36.
 - [x] Повторный аудит I0-08–I0-14: exact origin/tag/SHA, рекурсивные fixtures, arm64 release и pinned CI actions.
-- [x] JVM unit tests: 141/141 во всех модулях; добавлены Auto DNS fallback, GitHub updater/signing, security и Always-on/Lockdown policy.
+- [x] JVM unit tests: 147/147 во всех модулях; добавлены Auto DNS fallback, app-scoped health route, GitHub updater/signing, security и Always-on/Lockdown policy.
 - [x] Android instrumented tests: текущие 67/67 пройдены на API 36; базовые 66/66 — на API 26/29, security delta 3/3 — на API 26.
 - [x] Hard process recreation: `scripts/verify-process-recreation.sh` пройден на API 26/36; после смерти процесса ноль session/core/TUN/callback/client, после нового connect ровно один экземпляр.
 - [x] Packaged `.srs`: exact CLI RU/non-RU domain/IPv4/IPv6, manifest/license/SHA, atomic repair; 50 089 байт, cold install 14 мс на AVD API 36.
@@ -587,15 +587,16 @@ arm64 RC и незавершённая физическая матрица из 
 - [x] По отчётам Test 21 подтверждён Android WireGuard GRO/standard-bind сбой: handshake и первый DNS проходят, затем return data зависает. Runtime-only direct detour переводит endpoint без явного `detour` на `ClientBind`; health-route теперь обязателен во всех DNS-режимах, а профиль без DNS получает минимальный Android fallback. Exact pinned CLI и JVM regression tests проходят; физическая проверка остаётся открытой.
 - [x] Beta 23 опубликована из commit `6be23f4`, но проверка живого GitHub API показала, что старый updater сортирует `test.*` выше более нового `beta.*`; release и tag сохранены для аудита.
 - [x] Test 23 опубликован из commit `f602c19` для arm64-v8a, armeabi-v7a и x86_64 с versionCode `200123`, тем же debug signer, SHA-256 и updater metadata. Он дополнительно сортирует prerelease по `published_at` и находится первым для Test 21/22.
-- [x] Диагностика Test 23 доказала более широкий дефект pinned Android WireGuard: handshake и первый UDP DNS успешны, но TCP SYN/data-plane зависает; «Из JSON» давал ложный успех через direct IPv6. Android data-plane заменён без второго TUN на pinned vanilla/AWG движки metacubex, а WireGuard startup теперь синхронно проверяет выбранный concrete outbound через три bounded TCP/TLS endpoint.
+- [x] Диагностика Test 23 доказала более широкий дефект pinned Android WireGuard: handshake и первый UDP DNS успешны, но TCP SYN/data-plane зависает; «Из JSON» давал ложный успех через direct IPv6. Android data-plane заменён без второго TUN на pinned vanilla/AWG движки metacubex.
 - [x] Test 24 опубликован из commit `ba395b4` для arm64-v8a, armeabi-v7a и x86_64 с versionCode `200124`, тем же debug signer, SHA-256, updater metadata и точными версиями vanilla WireGuard/AmneziaWG data-plane модулей; физическая проверка новой архитектуры остаётся открытой.
+- [x] ADB evidence Test 24 подтвердил исправный Android TUN/VPN lifecycle и самозакрытие ровно через 12 секунд в добавленном `wireguard_data_plane`. Этот gate проверял доступность трёх публичных HTTPS-сайтов, а не handshake, дублировал общий health pipeline и скрывал core-log; он удалён. Общая HTTPS-проба теперь получает app-scoped TLS sniff и обязательный route в selected outbound, bounded core-log открывается до первой сетевой проверки.
 - [ ] Idle CPU/battery release-gate выполнен на физических устройствах.
 
-**Следующее действие:** установить Test 24 и на том же WireGuard-профиле проверить
+**Следующее действие:** установить Test 25 и на том же WireGuard-профиле проверить
 «Из JSON», DNS Android, Auto и Secure. В effective overlay должны быть
 `wireguard_android_engine_count=1`, отсутствие сгенерированного compatibility detour,
-IPv4 default allowed и точный inner MTU. Стадия `wireguard_data_plane` должна либо
-подтвердить concrete outbound, либо завершить запуск `VPN-200`, не объявляя direct IPv6 успехом. После успешного подключения повторить
+`health_probe_tls_sniff_count=1`, IPv4 default allowed и точный inner MTU. При отказе
+общей DNS/HTTPS-проверки startup core-log должен содержать bounded ранние записи. После успешного подключения повторить
 смену Wi‑Fi/mobile и длительную сессию; затем остаются физическая
 матрица этапа 8 (captive portal, IPv6-only/NAT64, камера/HTTPS subscription,
 blocked-DNS/LKG/DoH, OEM per-app/routing и энергия) и production signing key по `SIGNING.md`.

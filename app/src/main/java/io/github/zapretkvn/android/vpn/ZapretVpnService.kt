@@ -369,6 +369,7 @@ class ZapretVpnService : VpnService() {
                         dnsOverride = uiSettings.dnsOverride,
                         bootstrapHost = preparedBootstrap.overlay,
                         vpnHiding = vpnHiding,
+                        healthCheckPackageName = packageName,
                         updaterPackageName = packageName.takeIf { updaterRouting },
                     ),
                 )
@@ -446,6 +447,11 @@ class ZapretVpnService : VpnService() {
             resources.markLibboxStarted()
             check(token == controller.currentGeneration()) { "Запуск отменён." }
 
+            // Subscribe before any startup probe. The command server retains a bounded
+            // backlog, so handshake, transport and DNS failures remain available even
+            // when health verification fails and the session is closed immediately.
+            controller.startConnectionDiagnosticStage(token, "core_log", "Снимок bounded core-лога")
+            resources.openLogClient(controller)
             controller.startConnectionDiagnosticStage(token, "group_client", "Чтение selector-групп")
             resources.client = Libbox.newCommandClient(
                 GroupClientHandler(
@@ -458,45 +464,6 @@ class ZapretVpnService : VpnService() {
                 },
             ).also(CommandClient::connect)
             check(token == controller.currentGeneration()) { "Запуск отменён." }
-            preparedBootstrap.target
-                ?.takeIf { it.outboundType == "wireguard" }
-                ?.let { wireGuardTarget ->
-                    controller.startConnectionDiagnosticStage(
-                        token,
-                        "wireguard_data_plane",
-                        "WireGuard TCP/TLS через выбранный outbound",
-                    )
-                    try {
-                        withContext(Dispatchers.IO) {
-                            checkNotNull(resources.client).urlTest(wireGuardTarget.outboundTag)
-                        }
-                        controller.finishConnectionDiagnosticStage(
-                            generation = token,
-                            key = "wireguard_data_plane",
-                            status = DiagnosticStageStatus.Success,
-                            detail = "outbound=${wireGuardTarget.outboundTag}",
-                        )
-                    } catch (error: Throwable) {
-                        controller.finishConnectionDiagnosticStage(
-                            generation = token,
-                            key = "wireguard_data_plane",
-                            status = DiagnosticStageStatus.Failed,
-                            detail = generateSequence(error) { it.cause }
-                                .last()
-                                .javaClass
-                                .simpleName
-                                .take(80),
-                        )
-                        throw IllegalStateException(
-                            "WireGuard data-plane не прошёл проверку TCP/TLS.",
-                            error,
-                        )
-                    }
-                }
-            // Keep a bounded core log during startup so failed handshakes and DNS transports
-            // remain diagnosable. It is closed after health unless Diagnostics is visible.
-            controller.startConnectionDiagnosticStage(token, "core_log", "Снимок bounded core-лога")
-            resources.openLogClient(controller)
             controller.publish(
                 token,
                 VpnConnectionState.Starting(profileId, "Проверка DNS и HTTPS", updaterRouting),

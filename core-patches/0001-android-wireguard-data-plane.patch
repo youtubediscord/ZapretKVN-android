@@ -1,47 +1,3 @@
-diff --git a/daemon/started_service.go b/daemon/started_service.go
-index 3af0ea5a..ff4487f5 100644
---- a/daemon/started_service.go
-+++ b/daemon/started_service.go
-@@ -587,7 +587,25 @@ func (s *StartedService) URLTest(ctx context.Context, request *URLTestRequest) (
- 	}
- 	outboundGroup, isOutboundGroup := abstractOutboundGroup.(adapter.OutboundGroup)
- 	if !isOutboundGroup {
--		return nil, E.New("outbound is not a group: ", groupTag)
-+		// Zapret KVN uses a concrete outbound tag during startup. Unlike the
-+		// asynchronous group refresh below, this path must report whether the
-+		// selected data-plane can complete TCP+TLS before Android shows Connected.
-+		var lastError error
-+		for _, link := range startupURLTestLinks {
-+			testCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
-+			delay, testError := urltest.URLTest(testCtx, link, abstractOutboundGroup)
-+			cancel()
-+			if testError == nil {
-+				boxService.urlTestHistoryStorage.StoreURLTestHistory(groupTag, &adapter.URLTestHistory{
-+					Time:  time.Now(),
-+					Delay: delay,
-+				})
-+				return &emptypb.Empty{}, nil
-+			}
-+			lastError = testError
-+		}
-+		boxService.urlTestHistoryStorage.DeleteURLTestHistory(groupTag)
-+		return nil, E.Cause(lastError, "outbound data-plane check failed: ", groupTag)
- 	}
- 	urlTest, isURLTest := abstractOutboundGroup.(*group.URLTest)
- 	if isURLTest {
-@@ -626,6 +644,12 @@ func (s *StartedService) URLTest(ctx context.Context, request *URLTestRequest) (
- 	return &emptypb.Empty{}, nil
- }
- 
-+var startupURLTestLinks = []string{
-+	"https://cp.cloudflare.com/generate_204",
-+	"https://connectivitycheck.gstatic.com/generate_204",
-+	"https://dns.opendns.com/dns-query",
-+}
-+
- func (s *StartedService) SelectOutbound(ctx context.Context, request *SelectOutboundRequest) (*emptypb.Empty, error) {
- 	s.serviceAccess.RLock()
- 	switch s.serviceStatus.Status {
 diff --git a/go.mod b/go.mod
 index 5dde5da8..4469711f 100644
 --- a/go.mod
@@ -573,4 +529,3 @@ index 00000000..5a835582
 +
 +func (a testAddress) Network() string { return "udp" }
 +func (a testAddress) String() string  { return string(a) }
-
