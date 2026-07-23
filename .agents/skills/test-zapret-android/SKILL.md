@@ -44,16 +44,18 @@ Do not run a script that installs, uninstalls, clears, or changes device network
 For every future multi-step Windows evidence workflow, create or update a checked-in
 `.cmd` or `.ps1` file and give the user only the short download/run commands. Never
 ask the user to paste a multi-line workflow into interactive `cmd.exe`. Individual
-one-line inspection commands remain acceptable. Always provide a normal GitHub
-browser link and a `curl.exe` download command. Do not rely solely on
-`Invoke-WebRequest`: older Windows PowerShell installations can fail TLS negotiation
-with `raw.githubusercontent.com`.
+one-line inspection commands remain acceptable. Package the script as a ZIP, publish
+that ZIP as an asset of the current GitHub test prerelease, and give its normal
+browser download link as the primary delivery method. A checked-in GitHub file link
+and `curl.exe` command are secondary fallbacks only. Do not rely on
+`Invoke-WebRequest` or `raw.githubusercontent.com`: older Windows PowerShell, network
+filters and TLS interception can reset those connections.
 
-For the Windows video capture, download the script into the same directory as
-`adb.exe` and run the file instead of pasting its body into interactive `cmd.exe`.
-Some Windows console configurations execute only the first line of a pasted
-multi-line block. The script pauses before the measured 35-second playback window
-and again for the explicit diagnostic export:
+For the Windows video capture, download
+[`Zapret-KVN-video-evidence-collector.zip`](https://github.com/youtubediscord/ZapretKVN-android/releases/download/v0.2.1-test.25/Zapret-KVN-video-evidence-collector.zip)
+from the Test 25 GitHub Release in a browser, extract the script next to `adb.exe`
+and run the file. The script pauses before the measured 35-second playback window
+and again for the explicit diagnostic export. Use the following only as a fallback:
 
 ```bat
 cd /d D:\bin\platform-tools
@@ -63,8 +65,9 @@ collect-video-evidence-windows.cmd
 
 Browser fallback:
 [`collect-video-evidence-windows.cmd`](https://github.com/youtubediscord/ZapretKVN-android/blob/main/scripts/collect-video-evidence-windows.cmd)
-→ **Download raw file**. If `curl.exe` is also unavailable, publish a ZIP copy as a
-GitHub Release asset instead of returning to a pasted multi-line workflow.
+→ **Download raw file**. If the ZIP link must move to a newer test release, verify
+the release asset exists before giving the new URL. Never return to a pasted
+multi-line workflow.
 
 ## Capture a reproduction through ADB
 
