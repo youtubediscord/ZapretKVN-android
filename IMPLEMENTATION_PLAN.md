@@ -118,7 +118,7 @@ MVP готов только когда выполнены все пункты:
 
 - [x] `I2-01` Реализовать глобальный include allowlist в DataStore.
 - [x] `I2-02` Создать полноэкранный picker приложений: поиск, установленные пользовательские приложения, скрытые системные.
-- [x] `I2-03` Добавить встроенные suggestions для Instagram, YouTube, Telegram Stable/Beta/Direct, Telegram X, ZaStoGram и распространённых форков, WhatsApp, Discord, Signal, Chromium/Ultimatum и популярных браузеров; без TikTok. При первой инициализации также выбирать установленные Android browser handlers и обработчики `tg://`, не поддерживая бесконечный список package вручную.
+- [x] `I2-03` Добавить встроенные suggestions для Instagram, YouTube, Telegram Stable/Beta/Direct, Telegram X, ZaStoGram и распространённых форков, WhatsApp, Discord, Signal, ChatGPT, Claude, Gemini, Perplexity, Copilot, DeepSeek, Grok, Suno, Spotify, Notion, Chromium/Ultimatum и популярных браузеров; без TikTok. При первой инициализации также выбирать установленные Android browser handlers и обработчики `tg://`, не поддерживая бесконечный список package вручную. Новую группу AI/media/productivity-приложений один раз добавить к уже созданному include-списку после обновления, не возвращая её после последующего ручного снятия.
 - [x] `I2-04` Не запускать VPN при пустой effective allowlist или ошибке `addAllowedApplication()`; исчезнувшие/отключённые package пропускать до Builder, писать в bounded diagnostic log и продолжать при наличии хотя бы одного доступного приложения.
 - [x] `I2-05` Внутренне включать package Zapret KVN для health-check, не показывая его как пользовательский выбор.
 

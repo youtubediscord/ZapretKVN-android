@@ -109,6 +109,16 @@ class AppCatalog(context: Context) {
 
 object PopularAppSuggestions {
     private val labelsByPackage = mapOf(
+        "com.openai.chatgpt" to "ChatGPT",
+        "com.anthropic.claude" to "Claude",
+        "com.google.android.apps.bard" to "Gemini",
+        "ai.perplexity.app.android" to "Perplexity",
+        "com.microsoft.copilot" to "Microsoft Copilot",
+        "com.deepseek.chat" to "DeepSeek",
+        "ai.x.grok" to "Grok",
+        "com.suno.android" to "Suno",
+        "com.spotify.music" to "Spotify",
+        "notion.id" to "Notion",
         "com.instagram.android" to "Instagram",
         "com.instagram.lite" to "Instagram Lite",
         "com.google.android.youtube" to "YouTube",
@@ -180,6 +190,19 @@ object PopularAppSuggestions {
     )
 
     val packageNames: Set<String> = labelsByPackage.keys
+    const val MIGRATION_REVISION: Int = 1
+    val packagesAddedInCurrentRevision: Set<String> = setOf(
+        "com.openai.chatgpt",
+        "com.anthropic.claude",
+        "com.google.android.apps.bard",
+        "ai.perplexity.app.android",
+        "com.microsoft.copilot",
+        "com.deepseek.chat",
+        "ai.x.grok",
+        "com.suno.android",
+        "com.spotify.music",
+        "notion.id",
+    )
 
     fun labelFor(packageName: String): String? = labelsByPackage[packageName]
 }

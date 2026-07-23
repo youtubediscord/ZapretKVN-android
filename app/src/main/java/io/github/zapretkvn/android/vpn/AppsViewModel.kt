@@ -74,13 +74,18 @@ class AppsViewModel(
                 val installedApps = appCatalog.load()
                 apps.value = installedApps
                 catalogLoaded.value = true
+                val enabledSuggestedApps = installedApps
+                    .asSequence()
+                    .filter(InstalledApp::enabled)
+                    .filter { it.suggestion != null }
+                    .map(InstalledApp::packageName)
+                    .toSet()
                 selectionStore.initializeIfNeeded(
-                    installedApps
-                        .asSequence()
-                        .filter(InstalledApp::enabled)
-                        .filter { it.suggestion != null }
-                        .map(InstalledApp::packageName)
-                        .toSet(),
+                    suggestedPackages = enabledSuggestedApps,
+                    newlySuggestedPackages = enabledSuggestedApps.intersect(
+                        PopularAppSuggestions.packagesAddedInCurrentRevision,
+                    ),
+                    suggestionRevision = PopularAppSuggestions.MIGRATION_REVISION,
                 )
             } catch (failure: CancellationException) {
                 throw failure

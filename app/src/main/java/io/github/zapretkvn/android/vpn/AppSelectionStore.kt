@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
+import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -50,15 +51,31 @@ class AppSelectionStore(context: Context) {
             )
         }
 
-    suspend fun initializeIfNeeded(suggestedPackages: Set<String>) {
+    suspend fun initializeIfNeeded(
+        suggestedPackages: Set<String>,
+        newlySuggestedPackages: Set<String> = emptySet(),
+        suggestionRevision: Int = 0,
+    ) {
         dataStore.edit { preferences ->
-            if (preferences[INITIALIZED] != true) {
-                preferences[ALLOWED_PACKAGES] = normalizePackageNames(
-                    suggestedPackages,
-                    appContext.packageName,
-                )
-                preferences[INITIALIZED] = true
-            }
+            val initialized = preferences[INITIALIZED] == true
+            val mode = preferences[SCOPE_MODE]
+                ?.let { stored -> AppScopeMode.entries.firstOrNull { it.name == stored } }
+                ?: AppScopeMode.Include
+            preferences[ALLOWED_PACKAGES] = mergeSuggestedPackages(
+                currentPackages = preferences[ALLOWED_PACKAGES].orEmpty(),
+                suggestedPackages = suggestedPackages,
+                newlySuggestedPackages = newlySuggestedPackages,
+                initialized = initialized,
+                mode = mode,
+                storedSuggestionRevision = preferences[SUGGESTION_REVISION] ?: 0,
+                suggestionRevision = suggestionRevision,
+                ownPackageName = appContext.packageName,
+            )
+            preferences[INITIALIZED] = true
+            preferences[SUGGESTION_REVISION] = maxOf(
+                preferences[SUGGESTION_REVISION] ?: 0,
+                suggestionRevision,
+            )
         }
     }
 
@@ -101,7 +118,27 @@ class AppSelectionStore(context: Context) {
         val ALLOWED_PACKAGES = stringSetPreferencesKey("allowed_packages")
         val INITIALIZED = booleanPreferencesKey("initialized")
         val SCOPE_MODE = stringPreferencesKey("scope_mode")
+        val SUGGESTION_REVISION = intPreferencesKey("suggestion_revision")
     }
+}
+
+internal fun mergeSuggestedPackages(
+    currentPackages: Set<String>,
+    suggestedPackages: Set<String>,
+    newlySuggestedPackages: Set<String>,
+    initialized: Boolean,
+    mode: AppScopeMode,
+    storedSuggestionRevision: Int,
+    suggestionRevision: Int,
+    ownPackageName: String? = null,
+): Set<String> {
+    val packages = when {
+        !initialized -> suggestedPackages
+        mode == AppScopeMode.Include && storedSuggestionRevision < suggestionRevision ->
+            currentPackages + newlySuggestedPackages
+        else -> currentPackages
+    }
+    return normalizePackageNames(packages, ownPackageName)
 }
 
 internal fun normalizePackageNames(

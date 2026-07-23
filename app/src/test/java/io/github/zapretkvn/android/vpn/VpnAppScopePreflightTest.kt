@@ -120,6 +120,16 @@ class VpnAppScopePreflightTest {
     fun `suggestions contain requested apps and never contain TikTok`() {
         val packages = PopularAppSuggestions.packageNames
 
+        assertTrue("com.openai.chatgpt" in packages)
+        assertTrue("com.anthropic.claude" in packages)
+        assertTrue("com.google.android.apps.bard" in packages)
+        assertTrue("ai.perplexity.app.android" in packages)
+        assertTrue("com.microsoft.copilot" in packages)
+        assertTrue("com.deepseek.chat" in packages)
+        assertTrue("ai.x.grok" in packages)
+        assertTrue("com.suno.android" in packages)
+        assertTrue("com.spotify.music" in packages)
+        assertTrue("notion.id" in packages)
         assertTrue("com.instagram.android" in packages)
         assertTrue("com.google.android.youtube" in packages)
         assertTrue("com.google.android.apps.youtube.music" in packages)
@@ -147,6 +157,66 @@ class VpnAppScopePreflightTest {
         assertTrue("org.chromium.chrome.dev" in packages)
         assertTrue("org.mozilla.firefox" in packages)
         assertFalse(packages.any { it.contains("tiktok", ignoreCase = true) })
+    }
+
+    @Test
+    fun `new suggestions are added once to an initialized include list`() {
+        assertEquals(
+            sortedSetOf("com.example.current", "com.openai.chatgpt", "notion.id"),
+            mergeSuggestedPackages(
+                currentPackages = setOf("com.example.current"),
+                suggestedPackages = setOf("com.example.current", "com.spotify.music"),
+                newlySuggestedPackages = setOf("com.openai.chatgpt", "notion.id"),
+                initialized = true,
+                mode = AppScopeMode.Include,
+                storedSuggestionRevision = 0,
+                suggestionRevision = 1,
+            ),
+        )
+        assertEquals(
+            sortedSetOf("com.example.current"),
+            mergeSuggestedPackages(
+                currentPackages = setOf("com.example.current"),
+                suggestedPackages = emptySet(),
+                newlySuggestedPackages = setOf("com.openai.chatgpt"),
+                initialized = true,
+                mode = AppScopeMode.Include,
+                storedSuggestionRevision = 1,
+                suggestionRevision = 1,
+            ),
+        )
+    }
+
+    @Test
+    fun `exclude mode does not add new suggestions to the direct bypass list`() {
+        assertEquals(
+            sortedSetOf("com.example.direct"),
+            mergeSuggestedPackages(
+                currentPackages = setOf("com.example.direct"),
+                suggestedPackages = emptySet(),
+                newlySuggestedPackages = setOf("com.openai.chatgpt"),
+                initialized = true,
+                mode = AppScopeMode.Exclude,
+                storedSuggestionRevision = 0,
+                suggestionRevision = 1,
+            ),
+        )
+    }
+
+    @Test
+    fun `fresh initialization keeps all installed suggestions`() {
+        assertEquals(
+            sortedSetOf("com.openai.chatgpt", "com.spotify.music"),
+            mergeSuggestedPackages(
+                currentPackages = emptySet(),
+                suggestedPackages = setOf("com.openai.chatgpt", "com.spotify.music"),
+                newlySuggestedPackages = setOf("com.openai.chatgpt"),
+                initialized = false,
+                mode = AppScopeMode.Include,
+                storedSuggestionRevision = 0,
+                suggestionRevision = 1,
+            ),
+        )
     }
 
     @Test
