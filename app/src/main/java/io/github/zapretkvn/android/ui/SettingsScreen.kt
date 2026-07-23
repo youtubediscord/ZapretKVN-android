@@ -328,7 +328,7 @@ private fun SettingsMain(
                     }
                 }
                 Text(
-                    "Stable использует обычные GitHub Releases, Beta — любой prerelease. Канал применяется только при ручной проверке; ядро обновляется вместе с APK.",
+                    "Для каждой новой версии автоматически выбирается канал её сборки: Stable для обычной, Beta для prerelease. Его можно сменить вручную; ядро обновляется вместе с APK.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

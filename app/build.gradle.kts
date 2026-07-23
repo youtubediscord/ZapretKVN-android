@@ -24,6 +24,13 @@ val appVersionName = providers.gradleProperty("zapretVersionName")
     .orElse(providers.environmentVariable("ZAPRET_VERSION_NAME"))
     .orElse("0.2.0")
     .get()
+val defaultUpdateChannel = if (
+    Regex("""^\d+\.\d+\.\d+-beta\.\d+$""").matches(appVersionName)
+) {
+    "Beta"
+} else {
+    "Stable"
+}
 val debugVersionNameSuffix = providers.gradleProperty("zapretDebugVersionNameSuffix")
     .orElse("-debug")
     .get()
@@ -79,6 +86,7 @@ android {
 
         buildConfigField("String", "CORE_TAG", "\"$coreTag\"")
         buildConfigField("String", "UPDATE_REPOSITORY", "\"$updateRepository\"")
+        buildConfigField("String", "DEFAULT_UPDATE_CHANNEL", "\"$defaultUpdateChannel\"")
         buildConfigField(
             "String",
             "CORE_COMMIT",

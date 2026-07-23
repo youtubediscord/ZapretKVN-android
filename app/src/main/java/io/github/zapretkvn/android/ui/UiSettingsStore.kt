@@ -8,6 +8,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import io.github.zapretkvn.android.BuildConfig
 import io.github.zapretkvn.android.config.DnsMode
 import io.github.zapretkvn.android.config.DnsOverride
 import io.github.zapretkvn.android.hardening.TunMtuMode
@@ -39,7 +40,13 @@ private val Context.uiSettingsDataStore: DataStore<Preferences> by preferencesDa
     name = "ui_settings",
 )
 
-class UiSettingsStore(context: Context) {
+class UiSettingsStore(
+    context: Context,
+    private val buildDefaultUpdateChannel: UpdateChannel =
+        UpdateChannel.valueOf(BuildConfig.DEFAULT_UPDATE_CHANNEL),
+    private val updateChannelBuildId: String =
+        "${BuildConfig.VERSION_CODE}:${BuildConfig.VERSION_NAME}",
+) {
     private val dataStore = context.applicationContext.uiSettingsDataStore
 
     val settings: Flow<UiSettings> = dataStore.data
@@ -62,9 +69,12 @@ class UiSettingsStore(context: Context) {
                     hostname = preferences[DNS_OVERRIDE_HOSTNAME] ?: DnsOverride.DEFAULT_HOSTNAME,
                     ipv4Address = preferences[DNS_OVERRIDE_IPV4] ?: DnsOverride.DEFAULT_IPV4_ADDRESS,
                 ),
-                updateChannel = preferences[UPDATE_CHANNEL]
-                    ?.let { stored -> UpdateChannel.entries.firstOrNull { it.name == stored } }
-                    ?: UpdateChannel.Stable,
+                updateChannel = resolveUpdateChannel(
+                    storedChannel = preferences[UPDATE_CHANNEL],
+                    selectedForBuildId = preferences[UPDATE_CHANNEL_BUILD_ID],
+                    currentBuildId = updateChannelBuildId,
+                    buildDefault = buildDefaultUpdateChannel,
+                ),
                 vpnHiding = VpnHidingOptions(
                     blockLocalEndpoints = preferences[VPN_HIDING_BLOCK_LOCAL_ENDPOINTS] ?: true,
                     neutralSessionName = preferences[VPN_HIDING_NEUTRAL_SESSION_NAME] ?: false,
@@ -113,7 +123,10 @@ class UiSettingsStore(context: Context) {
     }
 
     suspend fun setUpdateChannel(channel: UpdateChannel) {
-        dataStore.edit { it[UPDATE_CHANNEL] = channel.name }
+        dataStore.edit {
+            it[UPDATE_CHANNEL] = channel.name
+            it[UPDATE_CHANNEL_BUILD_ID] = updateChannelBuildId
+        }
     }
 
     suspend fun setVpnHidingBlockLocalEndpoints(enabled: Boolean) {
@@ -138,10 +151,23 @@ class UiSettingsStore(context: Context) {
         val DNS_OVERRIDE_HOSTNAME = stringPreferencesKey("dns_override_hostname")
         val DNS_OVERRIDE_IPV4 = stringPreferencesKey("dns_override_ipv4")
         val UPDATE_CHANNEL = stringPreferencesKey("update_channel")
+        val UPDATE_CHANNEL_BUILD_ID = stringPreferencesKey("update_channel_build_id")
         val VPN_HIDING_BLOCK_LOCAL_ENDPOINTS =
             booleanPreferencesKey("vpn_hiding_block_local_endpoints")
         val VPN_HIDING_NEUTRAL_SESSION_NAME =
             booleanPreferencesKey("vpn_hiding_neutral_session_name")
         val VPN_HIDING_TUN_MTU_MODE = stringPreferencesKey("vpn_hiding_tun_mtu_mode")
     }
+}
+
+internal fun resolveUpdateChannel(
+    storedChannel: String?,
+    selectedForBuildId: String?,
+    currentBuildId: String,
+    buildDefault: UpdateChannel,
+): UpdateChannel {
+    if (selectedForBuildId != currentBuildId) return buildDefault
+    return storedChannel
+        ?.let { stored -> UpdateChannel.entries.firstOrNull { it.name == stored } }
+        ?: buildDefault
 }
