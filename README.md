@@ -1,6 +1,6 @@
 # Zapret KVN
 
-<img width="1916" height="821" alt="image" src="https://github.com/user-attachments/assets/27616d5b-08c6-4d2c-8a3e-d69c2f5da97f" />
+<img width="1916" height="821" alt="image" src="https://github.com/user-attachments/assets/704d2998-c00e-4b0d-8cb5-0dbeb3e23ef0" />
 
 ### VPN, который пропускает только необходимое
 
