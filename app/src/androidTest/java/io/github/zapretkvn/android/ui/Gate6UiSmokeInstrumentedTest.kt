@@ -9,6 +9,7 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.unit.dp
+import androidx.core.view.WindowCompat
 import io.github.zapretkvn.android.MainActivity
 import io.github.zapretkvn.android.ZapretApplication
 import io.github.zapretkvn.android.vpn.AppScopeMode
@@ -16,6 +17,7 @@ import io.github.zapretkvn.android.vpn.VpnConnectionState
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.After
+import org.junit.Assert.assertEquals
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -79,6 +81,14 @@ class Gate6UiSmokeInstrumentedTest {
             }
             composeRule.onNode(hasText("Добавить профиль") and hasClickAction())
                 .assertHeightIsAtLeast(48.dp)
+
+            composeRule.runOnUiThread {
+                val window = composeRule.activity.window
+                val insetsController = WindowCompat.getInsetsController(window, window.decorView)
+                val expectDarkIcons = mode == ThemeMode.Light
+                assertEquals(expectDarkIcons, insetsController.isAppearanceLightStatusBars)
+                assertEquals(expectDarkIcons, insetsController.isAppearanceLightNavigationBars)
+            }
         }
     }
 
