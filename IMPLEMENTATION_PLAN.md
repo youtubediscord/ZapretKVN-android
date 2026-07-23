@@ -601,9 +601,14 @@ production-signed arm64 APK на реальном устройстве и нез
   подключается к числовому адресу с исходными TLS SNI/certificate hostname/HTTP
   Host и возвращает `VPN-201`, если требуемого семейства нет. Сохранённый JSON не
   переписывается; неиспользуемые DNS servers только явно предупреждаются.
+- [x] Beta `v0.2.4-beta.1` опубликована из commit `4dff6b3` с production-подписью
+  для arm64-v8a, armeabi-v7a и x86_64. Runtime userspace WireGuard теперь задаёт
+  внешний Android TUN `min(1500, endpoint MTU)` во всех DNS-режимах; exact fixture,
+  JVM, lint и release-candidate проверки проходят. Физическое подтверждение остаётся
+  открытым пунктом `I6-10C`.
 - [ ] Idle CPU/battery release-gate выполнен на физических устройствах.
 
-**Следующее действие:** установить следующий test APK поверх stable 0.2.3 и на том же WireGuard-профиле проверить все четыре DNS-режима, эффективный `vpn_hiding.tun_mtu=1280`, фактический Android TUN MTU, HTTPS health по IPv4 и длительность остановки. Если видео всё ещё тормозит, выполнить чистый throughput A/B ↔ официальная Amnezia без смены сервера. Затем повторить
+**Следующее действие:** установить [beta 0.2.4-beta.1](https://github.com/youtubediscord/ZapretKVN-android/releases/tag/v0.2.4-beta.1) поверх stable 0.2.3 и на том же WireGuard-профиле проверить все четыре DNS-режима, эффективный `vpn_hiding.tun_mtu=1280`, фактический Android TUN MTU, HTTPS health по IPv4 и длительность остановки. Если видео всё ещё тормозит, выполнить чистый throughput A/B ↔ официальная Amnezia без смены сервера. Затем повторить
 «Из JSON», DNS Android, Auto, Secure, смену Wi‑Fi/mobile и длительную сессию; после этого остаются физическая
 матрица этапа 8 (captive portal, IPv6-only/NAT64, камера/HTTPS subscription,
 blocked-DNS/LKG/DoH, OEM per-app/routing и энергия) и production signing key по `SIGNING.md`.
