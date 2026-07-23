@@ -590,9 +590,10 @@ arm64 RC и незавершённая физическая матрица из 
 - [x] Диагностика Test 23 доказала более широкий дефект pinned Android WireGuard: handshake и первый UDP DNS успешны, но TCP SYN/data-plane зависает; «Из JSON» давал ложный успех через direct IPv6. Android data-plane заменён без второго TUN на pinned vanilla/AWG движки metacubex.
 - [x] Test 24 опубликован из commit `ba395b4` для arm64-v8a, armeabi-v7a и x86_64 с versionCode `200124`, тем же debug signer, SHA-256, updater metadata и точными версиями vanilla WireGuard/AmneziaWG data-plane модулей; физическая проверка новой архитектуры остаётся открытой.
 - [x] ADB evidence Test 24 подтвердил исправный Android TUN/VPN lifecycle и самозакрытие ровно через 12 секунд в добавленном `wireguard_data_plane`. Этот gate проверял доступность трёх публичных HTTPS-сайтов, а не handshake, дублировал общий health pipeline и скрывал core-log; он удалён. Общая HTTPS-проба теперь получает app-scoped TLS sniff и обязательный route в selected outbound, bounded core-log открывается до первой сетевой проверки.
+- [x] Test 25 опубликован из commit `a1ee9cb` для arm64-v8a, armeabi-v7a и x86_64 с versionCode `200125`, прежним debug signer, новым patch SHA-256, per-APK checksums и updater metadata; Git tag указывает точно на проверенный app commit.
 - [ ] Idle CPU/battery release-gate выполнен на физических устройствах.
 
-**Следующее действие:** установить Test 25 и на том же WireGuard-профиле проверить
+**Следующее действие:** установить [Test 25](https://github.com/youtubediscord/ZapretKVN-android/releases/tag/v0.2.1-test.25) и на том же WireGuard-профиле проверить
 «Из JSON», DNS Android, Auto и Secure. В effective overlay должны быть
 `wireguard_android_engine_count=1`, отсутствие сгенерированного compatibility detour,
 `health_probe_tls_sniff_count=1`, IPv4 default allowed и точный inner MTU. При отказе
