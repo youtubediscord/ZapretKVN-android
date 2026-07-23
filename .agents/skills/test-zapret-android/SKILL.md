@@ -56,6 +56,46 @@ adb.exe logcat -b main -b system -b crash -v threadtime > "%USERPROFILE%\Desktop
 
 Start the final command before reproducing. Use only the app needed for the reproduction, wait until success or the visible error, then stop logcat with `Ctrl+C`.
 
+Use this full two-phase Windows CMD capture by default for a VPN/TUN/DNS failure.
+Run it from the Windows prompt, never from `device:/ $`; type `exit` first if the
+prompt is an Android shell:
+
+```bat
+cd /d D:\bin\platform-tools
+set "ZAPRET_PKG=io.github.zapretkvn.android.debug"
+set "ZAPRET_EVIDENCE=%USERPROFILE%\Desktop\zapret-evidence"
+if not exist "%ZAPRET_EVIDENCE%" mkdir "%ZAPRET_EVIDENCE%"
+adb.exe devices -l > "%ZAPRET_EVIDENCE%\devices.txt" 2>&1
+adb.exe shell pm list packages | findstr /i zapretkvn > "%ZAPRET_EVIDENCE%\packages.txt"
+adb.exe shell getprop ro.build.version.release > "%ZAPRET_EVIDENCE%\android-release.txt"
+adb.exe shell getprop ro.build.version.sdk > "%ZAPRET_EVIDENCE%\android-api.txt"
+adb.exe shell getprop ro.product.cpu.abi > "%ZAPRET_EVIDENCE%\android-abi.txt"
+adb.exe logcat -c
+adb.exe logcat -b main -b system -b crash -v threadtime > "%ZAPRET_EVIDENCE%\zapret-logcat.txt"
+```
+
+While the last command is running, reproduce exactly once, wait for the visible
+result, then open `Настройки → Диагностика` and press `Экспортировать диагностику`
+without force-stopping or restarting the app. Once the Sharesheet appears, return
+to CMD and press `Ctrl+C`. Then run:
+
+```bat
+adb.exe shell dumpsys -l > "%ZAPRET_EVIDENCE%\dumpsys-services.txt" 2>&1
+adb.exe shell dumpsys connectivity > "%ZAPRET_EVIDENCE%\connectivity.txt" 2>&1
+adb.exe shell dumpsys netd > "%ZAPRET_EVIDENCE%\netd.txt" 2>&1
+adb.exe shell settings get global private_dns_mode > "%ZAPRET_EVIDENCE%\private-dns-mode.txt" 2>&1
+adb.exe shell settings get global private_dns_specifier > "%ZAPRET_EVIDENCE%\private-dns-specifier.txt" 2>&1
+adb.exe shell run-as %ZAPRET_PKG% ls -l cache/diagnostics > "%ZAPRET_EVIDENCE%\diagnostic-files.txt" 2>&1
+adb.exe exec-out run-as %ZAPRET_PKG% cat cache/diagnostics/zapret-kvn-diagnostic.json > "%ZAPRET_EVIDENCE%\zapret-kvn-diagnostic.json"
+powershell.exe -NoProfile -Command "Compress-Archive -Path $env:ZAPRET_EVIDENCE\* -DestinationPath $env:USERPROFILE\Desktop\zapret-evidence.zip -Force"
+```
+
+Treat the unfiltered logcat and redacted app diagnostic as complementary evidence:
+logcat proves Android `VpnService`, `ConnectivityService`, `netd/resolv`, interface,
+DNS and teardown behavior; the diagnostic contains the bounded libbox `CommandLog`,
+effective runtime overlay and stage timings. Always request both from the same
+attempt before changing VPN/TUN/DNS implementation.
+
 For Bash:
 
 ```bash
