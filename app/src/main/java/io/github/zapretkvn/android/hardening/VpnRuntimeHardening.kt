@@ -3,6 +3,7 @@ package io.github.zapretkvn.android.hardening
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 
 enum class TunMtuMode {
@@ -44,7 +45,10 @@ object VpnRuntimeHardening {
         if (options.blockLocalEndpoints) {
             hardened = removeLocalControlEndpoints(hardened)
         }
-        if (options.tunMtuMode == TunMtuMode.Normalize1500) {
+        if (
+            options.tunMtuMode == TunMtuMode.Normalize1500 &&
+            !hasUserspaceWireGuard(hardened)
+        ) {
             hardened = replaceTunMtu(hardened, NORMALIZED_MTU)
         }
         return RuntimeHardeningResult.Ready(hardened)
@@ -92,6 +96,21 @@ object VpnRuntimeHardening {
         })
         return JsonObject(root.toMutableMap().apply { this["inbounds"] = runtimeInbounds })
     }
+
+    /**
+     * The Android TUN and the inner userspace WireGuard endpoint are separate packet
+     * planes. Physical-device A/B showed that forcing the outer TUN to 1500 while the
+     * inner endpoint uses 1280 can pass handshakes and small DNS packets but black-hole
+     * TCP/TLS. Preserve the profile/core TUN MTU for userspace WireGuard; the stored
+     * JSON is never changed.
+     */
+    private fun hasUserspaceWireGuard(root: JsonObject): Boolean =
+        (root["endpoints"] as? JsonArray)
+            ?.mapNotNull { it as? JsonObject }
+            ?.any { endpoint ->
+                endpoint.string("type") == "wireguard" &&
+                    (endpoint["system"] as? JsonPrimitive)?.booleanOrNull != true
+            } == true
 
     private fun JsonObject.string(key: String): String? =
         (this[key] as? JsonPrimitive)?.contentOrNull

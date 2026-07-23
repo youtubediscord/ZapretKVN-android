@@ -89,9 +89,41 @@ class VpnRuntimeHardeningTest {
         assertEquals("Zapret KVN", VpnRuntimeHardening.sessionName(VpnHidingOptions()))
     }
 
+    @Test
+    fun `normalized mtu preserves profile or core value for userspace wireguard`() {
+        val source = root(
+            rootExtra = """
+                ,"endpoints":[{"type":"wireguard","tag":"wg","mtu":1280}]
+            """.trimIndent(),
+        )
+
+        val result = VpnRuntimeHardening.apply(source, VpnHidingOptions())
+            as RuntimeHardeningResult.Ready
+        val tun = (result.root["inbounds"] as JsonArray).single() as JsonObject
+
+        assertFalse("runtime TUN must keep the core default", "mtu" in tun)
+        assertFalse("stored profile must remain untouched", "\"mtu\":1500" in source.toString())
+    }
+
+    @Test
+    fun `normalized mtu still applies to system wireguard`() {
+        val source = root(
+            rootExtra = """
+                ,"endpoints":[{"type":"wireguard","tag":"wg-system","system":true}]
+            """.trimIndent(),
+        )
+
+        val result = VpnRuntimeHardening.apply(source, VpnHidingOptions())
+            as RuntimeHardeningResult.Ready
+        val tun = (result.root["inbounds"] as JsonArray).single() as JsonObject
+
+        assertEquals("1500", (tun["mtu"] as JsonPrimitive).content)
+    }
+
     private fun root(
         experimental: String? = null,
         extraInbound: String = "",
+        rootExtra: String = "",
     ): JsonObject {
         val suffix = experimental?.let { ",$it" }.orEmpty()
         return JsonConfig.parse(
@@ -99,6 +131,7 @@ class VpnRuntimeHardeningTest {
                 {
                   "inbounds":[{"type":"tun","address":["172.19.0.1/30","fd00::1/126"],"auto_route":true}$extraInbound]
                   $suffix
+                  $rootExtra
                 }
             """.trimIndent(),
         ) as JsonObject

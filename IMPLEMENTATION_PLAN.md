@@ -303,7 +303,7 @@ connect health-check и затем только при видимой диагн
 - [x] `I6-10` Завершить Настройки: тема, DNS, Stable/Beta, Диагностика, Сообщество, О приложении.
 - [x] `I6-10A` Добавить отдельный экран «Скрытие VPN» и rootless runtime-модуль без нового process/thread/polling: localhost endpoints закрыты по умолчанию, stored JSON не меняется.
 - [ ] `I6-10B` Завершить physical gate MTU 1500 на IPv4/IPv6/NAT64/QUIC, операторах, OEM и энергии; initial device-test позволил включить default с явным откатом к profile/core.
-- [ ] `I6-10C` Проверить на физическом Android WireGuard/AWG с раздельными MTU: внешний TUN 1500 и внутренний endpoint 1280 по умолчанию; явный endpoint `mtu` не переопределяется.
+- [ ] `I6-10C` Повторно проверить на физическом Android WireGuard/AWG после исправления: Test 25 с core/profile TUN MTU подключался, а stable 0.2.1/0.2.2 с принудительным внешним TUN 1500 и внутренним endpoint 1280 воспроизводимо блокировал TCP/TLS после успешных handshake/DNS. Runtime теперь не нормализует TUN до 1500 для userspace WireGuard; явный endpoint `mtu` не переопределяется.
 - [x] `I6-11` Разместить Telegram-ссылки только в «Настройки → Сообщество».
 - [x] `I6-12` Добавить accessibility labels, нормальный back navigation, состояния loading/empty/error и крупные touch targets.
 - [x] `I6-13` Ограничить анимации стандартными Compose/Material; не добавлять тяжёлый dashboard.
@@ -603,7 +603,7 @@ production-signed arm64 APK на реальном устройстве и нез
   переписывается; неиспользуемые DNS servers только явно предупреждаются.
 - [ ] Idle CPU/battery release-gate выполнен на физических устройствах.
 
-**Следующее действие:** установить [stable 0.2.2](https://github.com/youtubediscord/ZapretKVN-android/releases/tag/v0.2.2) поверх 0.2.1 и на том же WireGuard-профиле проверить все четыре DNS-режима, HTTPS health по IPv4 и длительность остановки. Если видео всё ещё тормозит, выполнить чистый throughput A/B 0.2.2 ↔ официальная Amnezia без смены сервера. Затем повторить
+**Следующее действие:** установить следующий patch release поверх 0.2.2 и на том же WireGuard-профиле проверить все четыре DNS-режима, эффективный `vpn_hiding.tun_mtu=0`, HTTPS health по IPv4 и длительность остановки. Если видео всё ещё тормозит, выполнить чистый throughput A/B ↔ официальная Amnezia без смены сервера. Затем повторить
 «Из JSON», DNS Android, Auto, Secure, смену Wi‑Fi/mobile и длительную сессию; после этого остаются физическая
 матрица этапа 8 (captive portal, IPv6-only/NAT64, камера/HTTPS subscription,
 blocked-DNS/LKG/DoH, OEM per-app/routing и энергия) и production signing key по `SIGNING.md`.

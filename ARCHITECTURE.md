@@ -616,7 +616,7 @@ Gate: APK не выпускается при failed fixture, instrumented test, 
 - 7/7 приняты compatibility release CLI;
 - [Android WireGuard ClientBind fixture](testdata/routing/wireguard-android-client-bind.json),
   SHA-256 `8e37bca042305e582240cb1614853beceb12a09b49048e560bd540b9f01ac1d8`,
-  фиксирует runtime-only direct detour и `network_strategy: default`;
+  фиксирует Android WireGuard endpoint, health-route и раздельные TUN/endpoint MTU;
 - `go test ./dns/... ./route/rule ./experimental/libbox` проходит; наш воспроизводимый audit test дополнительно проверяет exact pinned fallback success/error/hang/RCODE внутри исходного Go package;
 - Gradle-проект с направленными library-модулями собирает одно-ABI debug и R8 release-матрицу; каждый APK содержит ровно один ABI, один process и один `VpnService`;
 - 147/147 JVM unit-тестов проходят, включая DNS/routing/import/updater/signing и Always-on policy;

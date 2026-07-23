@@ -79,12 +79,14 @@ class RuntimeConfigBuilderTest {
         val root = JsonConfig.parse(result.json) as JsonObject
         val endpoints = (root["endpoints"] as JsonArray)
             .map { it as JsonObject }
+        val tun = (root["inbounds"] as JsonArray).single() as JsonObject
 
         assertEquals("1280", (endpoints[0]["mtu"] as JsonPrimitive).content)
         assertEquals(null, endpoints[0].string("detour"))
         assertEquals("1376", (endpoints[1]["mtu"] as JsonPrimitive).content)
         assertEquals("custom-direct", endpoints[1].string("detour"))
         assertFalse("mtu" in endpoints[2])
+        assertFalse("userspace WireGuard must keep the TUN core default", "mtu" in tun)
         assertFalse("stored profile must stay untouched", "1280" in stored)
         assertFalse("stored profile must not gain a detour", "zapret-wireguard-direct" in stored)
     }
