@@ -37,8 +37,26 @@ Use existing device scripts instead of recreating their logic:
 - `scripts/verify-gate8-stress.sh`: destructive Wi-Fi/cellular stress intended only for a disposable AVD.
 - `scripts/verify-gate8-performance.sh`: extended performance and power evidence; inspect its prerequisites and mutations before running.
 - `scripts/verify-release-candidate.sh`: host-side APK/revision/ABI/manifest verification.
+- `scripts/collect-video-evidence-windows.cmd`: non-destructive physical-device capture for a stuttering video session. It records process/thread CPU, a scheduler trace, memory, interface counters, connectivity, unfiltered logcat and the explicitly exported app diagnostic.
 
 Do not run a script that installs, uninstalls, clears, or changes device networking unless that mutation is within the user's requested test scope.
+
+For every future multi-step Windows evidence workflow, create or update a checked-in
+`.cmd` or `.ps1` file and give the user only the short download/run commands. Never
+ask the user to paste a multi-line workflow into interactive `cmd.exe`. Individual
+one-line inspection commands remain acceptable.
+
+For the Windows video capture, download the script into the same directory as
+`adb.exe` and run the file instead of pasting its body into interactive `cmd.exe`.
+Some Windows console configurations execute only the first line of a pasted
+multi-line block. The script pauses before the measured 35-second playback window
+and again for the explicit diagnostic export:
+
+```bat
+cd /d D:\bin\platform-tools
+powershell.exe -NoProfile -Command "Invoke-WebRequest 'https://raw.githubusercontent.com/youtubediscord/ZapretKVN-android/main/scripts/collect-video-evidence-windows.cmd' -OutFile 'collect-video-evidence-windows.cmd'"
+collect-video-evidence-windows.cmd
+```
 
 ## Capture a reproduction through ADB
 
