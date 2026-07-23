@@ -7,4 +7,8 @@
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:windowActionModeOverlay">true</item>
     </style>
+
+    <style name="Theme.ZapretKVN.Splash" parent="Theme.ZapretKVN">
+        <item name="android:windowBackground">@color/splash_background</item>
+    </style>
 </resources>
