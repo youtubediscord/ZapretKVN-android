@@ -160,20 +160,16 @@ object RuntimeConfigBuilder {
                 ?: return invalid("В конфигурации отсутствуют outbounds для bootstrap.")
         }
         val storedLog = root["log"] as? JsonObject
-        val runtimeLog = if (managed || storedLog != null) {
-            buildJsonObject {
-                storedLog?.forEach { (key, value) ->
-                    if (key != "output" && (!managed || key != "level")) put(key, value)
-                }
-                if (managed) put("level", "warn")
+        val runtimeLog = buildJsonObject {
+            storedLog?.forEach { (key, value) ->
+                if (key != "output" && key != "level") put(key, value)
             }
-        } else {
-            null
+            put("level", runtimeLogLevel(storedLog?.string("level")))
         }
 
         val runtimeRoot = root.toMutableMap().apply {
                 this["inbounds"] = runtimeInbounds
-                runtimeLog?.let { this["log"] = it }
+                this["log"] = runtimeLog
                 runtimeOutbounds?.let { this["outbounds"] = it }
                 if (managed) {
                     sanitizeManagedExperimental(root["experimental"])?.let {
@@ -203,6 +199,17 @@ object RuntimeConfigBuilder {
         if (dnsOverlay is RuntimeConfigResult.Invalid) return dnsOverlay
         val runtime = (dnsOverlay as RuntimeConfigResult.Ready).json
         return RuntimeConfigResult.Ready(runtime)
+    }
+
+    /**
+     * sing-box defaults to trace when log.level is absent. A VPN data plane must
+     * never inherit that expensive default, including raw and endpoint-only
+     * profiles. Preserve levels that are stricter than warn and clamp every
+     * verbose level in the runtime copy without rewriting the stored JSON.
+     */
+    private fun runtimeLogLevel(storedLevel: String?): String = when (storedLevel?.lowercase()) {
+        "panic", "fatal", "error" -> storedLevel.lowercase()
+        else -> RUNTIME_LOG_LEVEL
     }
 
     /** Applies the conservative Amnezia MTU to Android's runtime copy only. */
@@ -770,6 +777,7 @@ object RuntimeConfigBuilder {
     private val PROXY_DNS_MODES = setOf(DnsMode.Automatic, DnsMode.Secure)
     private const val ANDROID_DNS_TAG = "zapret-android-dns"
     private const val ANDROID_WIREGUARD_MTU = 1280
+    private const val RUNTIME_LOG_LEVEL = "warn"
     private const val DOH_1_TAG = "zapret-doh-1"
     private const val DOH_2_TAG = "zapret-doh-2"
     private const val DOH_3_TAG = "zapret-doh-3"

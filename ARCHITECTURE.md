@@ -385,7 +385,9 @@ Auto/Secure не запускаются при strict Private DNS, потому 
 | Три DoH параллельно | Только последний Auto-этап или явный Secure: exact core с `sequential` не достигает резерва, если первый DoH занял общий deadline; на успешных profile/Android-этапах DoH-запросов нет |
 | Отдельный VPN-процесс | Отклонён до профилирования: добавляет IPC/process overhead и усложняет lifecycle |
 
-Pinned Android AAR собирается с `with_gvisor`. Для managed TUN поле `stack` не переопределяем: exact core выбирает upstream default `mixed`. Runtime по умолчанию нормализует TUN MTU до `1500`, поскольку проверка на реальном устройстве показала заметно меньшую задержку относительно Android-specific core default `9000`. Сохранённый JSON не переписывается; в настройках остаётся явный возврат к MTU профиля/core для несовместимых сетей.
+Pinned Android AAR собирается с `with_gvisor`. Для managed TUN поле `stack` не переопределяем: exact core выбирает upstream default `mixed`. Runtime по умолчанию нормализует TUN MTU до `1500`, поскольку первоначальная проверка на реальном устройстве показала меньшую задержку относительно Android-specific core default `9000`; последующий видеотест дал одинаковое зависание при `1500` и `9000`, поэтому MTU не считается причиной этой неисправности и остаётся явно переключаемой настройкой до полной физической матрицы.
+
+Runtime-копия каждого профиля, включая raw JSON и endpoint-only WireGuard/AWG, всегда получает `log.level=warn`; явно более строгие `error`, `fatal` и `panic` сохраняются. `trace`, `debug`, `info`, `notice` и отсутствие уровня ограничиваются до `warn`, а `log.output` удаляется. Это обязательно, потому что exact core при отсутствующем `log.level` выбирает `trace`, что создаёт ненужную работу на data-plane. Сохранённый JSON не переписывается.
 
 Итог аудита: безопасного более раннего фильтра для домена/IP на stock Android не найдено. Текущая схема использует самый ранний доступный UID-фильтр, binary IP/domain lookup и не гонит `direct/reject` на VPN-сервер. Дальнейшее ускорение возможно только ценой root, proxy-only, огромных system routes или собственного patch ядра.
 

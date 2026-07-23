@@ -261,6 +261,31 @@ class RuntimeConfigBuilderTest {
     }
 
     @Test
+    fun `raw profile without log never inherits sing box trace default`() {
+        val raw = validConfig()
+            .replace("\"tag\":\"zapret-proxy\"", "\"tag\":\"user-selector\"")
+            .replace("\"final\":\"zapret-proxy\"", "\"final\":\"user-selector\"")
+        val runtime = RuntimeConfigBuilder.build(raw) as RuntimeConfigResult.Ready
+        val log = (JsonConfig.parse(runtime.json) as JsonObject)["log"] as JsonObject
+
+        assertEquals("warn", (log["level"] as JsonPrimitive).content)
+        assertFalse("stored profile must stay untouched", "\"log\"" in raw)
+    }
+
+    @Test
+    fun `raw verbose log is clamped in runtime without mutating source`() {
+        val raw = validConfig(rootExtra = """, "log":{"level":"trace","timestamp":true}""")
+            .replace("\"tag\":\"zapret-proxy\"", "\"tag\":\"user-selector\"")
+            .replace("\"final\":\"zapret-proxy\"", "\"final\":\"user-selector\"")
+        val runtime = RuntimeConfigBuilder.build(raw) as RuntimeConfigResult.Ready
+        val log = (JsonConfig.parse(runtime.json) as JsonObject)["log"] as JsonObject
+
+        assertEquals("warn", (log["level"] as JsonPrimitive).content)
+        assertTrue((log["timestamp"] as JsonPrimitive).boolean)
+        assertTrue("stored profile must keep its explicit level", "\"level\":\"trace\"" in raw)
+    }
+
+    @Test
     fun `auto route and auto interface detection are mandatory`() {
         val noAutoRoute = validConfig().replace("\"auto_route\":true", "\"auto_route\":false")
         val noAutoInterface = validConfig().replace(
