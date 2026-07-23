@@ -4,7 +4,7 @@
 
 | Поле | Значение |
 |---|---|
-| Статус | Этапы 0–7 и automated Gate 8 реализованы; внешний release/signing setup и физическая матрица остаются открыты |
+| Статус | Этапы 0–7, постоянная подпись, GitHub prerelease и automated Gate 8 готовы; физическая матрица и две офлайн-копии ключа остаются открыты |
 | Текущий этап | Этап 8: обязательная выпускная матрица |
 | Минимальная ОС | Android 8.0, API 26 |
 | Устройства MVP | Телефоны |
@@ -31,7 +31,7 @@
 - [x] Зафиксирован точный commit ядра.
 - [x] Подготовлены и проверены 7/7 эталонных JSON, включая Android WireGuard ClientBind.
 - [x] Пройден `go test ./dns/... ./route/rule ./experimental/libbox`.
-- [ ] До первой публичной сборки выбрать окончательные `applicationId`, namespace и имя signing key.
+- [x] До первой публичной сборки выбрать окончательные `applicationId`, namespace и имя signing key.
 - [x] Для production rule-set зафиксированы источники, лицензии, commit и SHA-256 списков.
 
 ## Definition of Done MVP
@@ -44,7 +44,7 @@ MVP готов только когда выполнены все пункты:
 - [ ] При сломанном сервере или DNS TUN полностью закрывается, обычная сеть восстанавливается.
 - [ ] Импорт, GUI-редактирование и backup не теряют неизвестные extended-поля JSON.
 - [ ] Пройдены fixture, unit, instrumented, lifecycle, redaction, update и energy release-gates.
-- [ ] Release APK содержит ядро нужного commit, подписан постоянным ключом и опубликован с SHA-256.
+- [x] Release APK содержит ядро нужного commit, подписан постоянным ключом и опубликован с SHA-256.
 
 ## Этап 0 — каркас и воспроизводимая сборка
 
@@ -75,7 +75,7 @@ MVP готов только когда выполнены все пункты:
 
 - [x] Чистый checkout одной командой собирает debug APK.
 - [x] APK устанавливается и открывает четыре вкладки на API 26 и современной версии Android.
-- [ ] CI подтверждает exact core revision и принимает 7/7 fixtures.
+- [x] CI подтверждает exact core revision и принимает 7/7 fixtures.
 - [x] В release manifest нет запрещённых разрешений, второго process или второго VPN service.
 
 ## Этап 1 — профили и настоящий JSON
@@ -431,26 +431,27 @@ Release workflow принимает строгие tags `vMAJOR.MINOR.PATCH` и 
 детерминированный монотонный versionCode, собирает exact pinned core, тестирует, подписывает
 отдельные arm64-v8a/armeabi-v7a/x86_64 APK секретами environment `release`, проверяет
 `apksigner`/manifest/единственность ABI и публикует APK, SHA-256, metadata и notes один раз без замены уже опубликованных assets. Локальная сборка
-этого bundle пройдена с одноразовым тестовым ключом.
+этого bundle пройдена с постоянным production-ключом; опубликован prerelease
+`v0.2.1-beta.30` с тремя ABI, checksum и metadata.
 
-`I7-07` остаётся внешним действием владельца: workflow и [инструкция](SIGNING.md) готовы,
-но настоящий постоянный ключ, две зашифрованные офлайн-копии и GitHub Secrets невозможно
-создать честно без выбранного владельцем ключа и доступа к репозиторию.
+Постоянный ключ создан, проверен и добавлен владельцем в GitHub Secrets; workflow и
+[инструкция](SIGNING.md) готовы. `I7-07` остаётся открытым только до подтверждения двух
+отдельных зашифрованных офлайн-копий ключа.
 
 ### Gate 7
 
 - [x] Неверный checksum, другая подпись, прерванная загрузка и downgrade обрабатываются безопасно.
 - [x] После update/cancel/restart cache не содержит старых APK.
 - [x] Release APK воспроизводимо содержит указанный core revision.
-- [ ] GitHub Release содержит APK, SHA-256 и достаточную информацию для независимой проверки.
+- [x] GitHub Release содержит APK, SHA-256 и достаточную информацию для независимой проверки.
 
 Автоматизированный Gate 7 пройден на AVD API 26/36. `scripts/verify-same-key-upgrade.sh`
 установил build 701001, записал настоящий профиль/DataStore/allowlist, обновил тем же ключом
 до 701002 и подтвердил сохранность. Затем Android отклонил downgrade и переподписанный
 другим ключом APK как `VERSION_DOWNGRADE`/`UPDATE_INCOMPATIBLE`, не повредив данные.
 Unit/instrumented тесты отдельно проверяют rotation lineage, multi-signer, package/version,
-неверный checksum, прерванный `.part`, installer cancel и startup cleanup. Последний пункт
-Gate остаётся внешним до первого фактически опубликованного GitHub Release.
+неверный checksum, прерванный `.part`, installer cancel и startup cleanup. Публичный
+prerelease `v0.2.1-beta.30` содержит три ABI, отдельные SHA-256 и обе metadata-схемы.
 
 ## Этап 8 — обязательная выпускная матрица
 
