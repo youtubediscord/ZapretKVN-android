@@ -38,6 +38,10 @@ Use existing device scripts instead of recreating their logic:
 - `scripts/verify-gate8-performance.sh`: extended performance and power evidence; inspect its prerequisites and mutations before running.
 - `scripts/verify-release-candidate.sh`: host-side APK/revision/ABI/manifest verification.
 - `scripts/collect-video-evidence-windows.cmd`: non-destructive physical-device capture for a stuttering video session. It records process/thread CPU, a scheduler trace, memory, interface counters, connectivity, unfiltered logcat and the explicitly exported app diagnostic.
+- `scripts/collect-stable-gate-windows.cmd`: non-destructive four-phase release-package
+  capture for stable `0.2.1`: VPN-off idle, VPN-on idle, selected-app video and
+  Wi-Fi/mobile switching. It records objective CPU, PSS, traces, battery counters,
+  interfaces, connectivity and logcat without using `run-as`.
 
 Do not run a script that installs, uninstalls, clears, or changes device networking unless that mutation is within the user's requested test scope.
 
@@ -68,6 +72,13 @@ Browser fallback:
 → **Download raw file**. If the ZIP link must move to a newer test release, verify
 the release asset exists before giving the new URL. Never return to a pasted
 multi-line workflow.
+
+For stable `0.2.1` physical measurements, download
+[`Zapret-KVN-stable-gate-collector.zip`](https://github.com/youtubediscord/ZapretKVN-android/releases/download/v0.2.1-beta.30/Zapret-KVN-stable-gate-collector.zip)
+in a browser, extract it next to `adb.exe`, and run
+`collect-stable-gate-windows.cmd`. Run it once per profile/outbound under test. The
+release package is not debuggable, so a redacted in-app diagnostic remains a
+separate Sharesheet export and is only required when a VPN/DNS phase fails.
 
 ## Capture a reproduction through ADB
 
