@@ -52,8 +52,8 @@ and `curl.exe` command are secondary fallbacks only. Do not rely on
 filters and TLS interception can reset those connections.
 
 For the Windows video capture, download
-[`Zapret-KVN-video-evidence-collector.zip`](https://github.com/youtubediscord/ZapretKVN-android/releases/download/v0.2.1-test.25/Zapret-KVN-video-evidence-collector.zip)
-from the Test 25 GitHub Release in a browser, extract the script next to `adb.exe`
+[`Zapret-KVN-video-evidence-collector.zip`](https://github.com/youtubediscord/ZapretKVN-android/releases/download/v0.2.1-test.26/Zapret-KVN-video-evidence-collector.zip)
+from the Test 26 GitHub Release in a browser, extract the script next to `adb.exe`
 and run the file. The script pauses before the measured 35-second playback window
 and again for the explicit diagnostic export. Use the following only as a fallback:
 

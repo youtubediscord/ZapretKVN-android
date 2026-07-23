@@ -592,13 +592,10 @@ arm64 RC и незавершённая физическая матрица из 
 - [x] ADB evidence Test 24 подтвердил исправный Android TUN/VPN lifecycle и самозакрытие ровно через 12 секунд в добавленном `wireguard_data_plane`. Этот gate проверял доступность трёх публичных HTTPS-сайтов, а не handshake, дублировал общий health pipeline и скрывал core-log; он удалён. Общая HTTPS-проба теперь получает app-scoped TLS sniff и обязательный route в selected outbound, bounded core-log открывается до первой сетевой проверки.
 - [x] Test 25 опубликован из commit `a1ee9cb` для arm64-v8a, armeabi-v7a и x86_64 с versionCode `200125`, прежним debug signer, новым patch SHA-256, per-APK checksums и updater metadata; Git tag указывает точно на проверенный app commit.
 - [x] Evidence Test 25 исключил MTU как самостоятельную причину видеозависания: одинаковое поведение воспроизводится при внешнем TUN `1500` и profile/core `9000`. Найден общий для raw/WireGuard/VLESS runtime-дефект: exact core без `log.level` выбирает `trace`; теперь runtime всех профилей ограничен `warn` (или более строгим сохранённым уровнем), `log.output` удаляется, а профиль на диске не меняется.
+- [x] Test 26 опубликован из commit `9103ed1` для arm64-v8a, armeabi-v7a и x86_64 с versionCode `200126`, прежним debug signer, per-APK checksums и updater metadata. Он изолированно проверяет новую runtime logging policy при неизменных core и WireGuard data-plane.
 - [ ] Idle CPU/battery release-gate выполнен на физических устройствах.
 
-**Следующее действие:** установить [Test 25](https://github.com/youtubediscord/ZapretKVN-android/releases/tag/v0.2.1-test.25) и на том же WireGuard-профиле проверить
-«Из JSON», DNS Android, Auto и Secure. В effective overlay должны быть
-`wireguard_android_engine_count=1`, отсутствие сгенерированного compatibility detour,
-`health_probe_tls_sniff_count=1`, IPv4 default allowed и точный inner MTU. При отказе
-общей DNS/HTTPS-проверки startup core-log должен содержать bounded ранние записи. После успешного подключения повторить
-смену Wi‑Fi/mobile и длительную сессию; затем остаются физическая
+**Следующее действие:** установить [Test 26](https://github.com/youtubediscord/ZapretKVN-android/releases/tag/v0.2.1-test.26) поверх Test 25 и на том же профиле, DNS-режиме и видео сравнить время запуска и буферизацию. В diagnostic JSON runtime должен сохранять только `warn`/ошибки вместо непрерывного `trace`; если видео всё ещё тормозит, выполнить чистый throughput A/B Test 26 ↔ официальная Amnezia без смены сервера. Затем повторить
+«Из JSON», DNS Android, Auto, Secure, смену Wi‑Fi/mobile и длительную сессию; после этого остаются физическая
 матрица этапа 8 (captive portal, IPv6-only/NAT64, камера/HTTPS subscription,
 blocked-DNS/LKG/DoH, OEM per-app/routing и энергия) и production signing key по `SIGNING.md`.
