@@ -196,10 +196,34 @@ class ImportParserTest {
     }
 
     @Test
-    fun `unknown subscription line fails the whole import`() {
+    fun `text dump extracts every supported link across labels wrappers and shared lines`() {
+        val vmessPayload = Base64.getEncoder().withoutPadding().encodeToString(
+            """{"v":"2","ps":"VMess","add":"vm.example","port":"443","id":"22222222-2222-4222-8222-222222222222","aid":"0","scy":"auto","net":"tcp","tls":"tls","sni":"vm.example"}"""
+                .toByteArray(),
+        )
         val input = """
-            vless://11111111-1111-4111-8111-111111111111@one.example:443
-            socks://user:password@unknown.example:1080
+            Конфиги из бота:
+            1. Основной: vless://11111111-1111-4111-8111-111111111111@one.example:443#One
+            Резервные: <vmess://$vmessPayload> trojan://secret@trojan.example:443#Trojan,
+            Канал: https://t.me/example
+            Последний — hy2://secret@hy.example:443?sni=hy.example#HY2.
+        """.trimIndent()
+
+        val candidate = ImportParser.parse(input, ProfileSource.File, "Все конфиги") as ImportCandidate.Managed
+
+        assertEquals(
+            listOf("vless", "vmess", "trojan", "hysteria2"),
+            candidate.servers.map { it.outbound.string("type") },
+        )
+        assertEquals(listOf("One", "VMess", "Trojan", "HY2"), candidate.servers.map { it.displayName })
+        assertEquals("Все конфиги", candidate.suggestedName)
+    }
+
+    @Test
+    fun `unsupported config scheme still fails the whole import`() {
+        val input = """
+            Основной: vless://11111111-1111-4111-8111-111111111111@one.example:443
+            Резерв: socks://user:password@unknown.example:1080
         """.trimIndent()
 
         assertThrows(ImportException::class.java) {

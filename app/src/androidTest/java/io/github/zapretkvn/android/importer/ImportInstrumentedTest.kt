@@ -166,6 +166,24 @@ class ImportInstrumentedTest {
     }
 
     @Test
+    fun clipboardReaderCombinesEveryTextItem() {
+        val clipboard = context.getSystemService(ClipboardManager::class.java)
+        val clip = ClipData.newPlainText(
+            "profiles",
+            "vless://11111111-1111-4111-8111-111111111111@one.example:443#One",
+        ).apply {
+            addItem(ClipData.Item("trojan://secret@two.example:443#Two"))
+        }
+
+        clipboard.setPrimaryClip(clip)
+        val imported = AndroidImportReader(context).readClipboardAfterUserAction()
+        clipboard.setPrimaryClip(ClipData.newPlainText("", ""))
+        val candidate = ImportParser.parse(imported, ProfileSource.Clipboard) as ImportCandidate.Managed
+
+        assertEquals(2, candidate.servers.size)
+    }
+
+    @Test
     fun managedSingleAndSubscriptionPassLibboxCheckConfig() {
         val one = vless("One", "one.example")
         val two = vless("Two", "two.example")

@@ -94,14 +94,12 @@ object ImportParser {
             )
         }
 
-        val linkText = decodeSubscriptionIfNeeded(text)
-        val links = linkText.lineSequence()
-            .map(String::trim)
-            .filter { it.isNotEmpty() && !it.startsWith('#') }
-            .toList()
-        if (links.isEmpty()) throw ImportException("Подписка не содержит ссылок.")
-        links.firstOrNull { link -> SUPPORTED_SCHEMES.none { link.startsWith(it, true) } }
-            ?.let { throw ImportException("Подписка содержит неизвестную строку; импорт остановлен.") }
+        val links = extractLinks(text).ifEmpty {
+            val decoded = decodeSubscription(text)
+            extractLinks(decoded).ifEmpty {
+                throw ImportException("В подписке нет поддерживаемых ссылок.")
+            }
+        }
         val servers = links.mapIndexed { index, link -> ShareLinkParser.parse(link, index) }
         return ImportCandidate.Managed(
             servers = servers,
@@ -118,37 +116,56 @@ object ImportParser {
         )
     }
 
-    private fun decodeSubscriptionIfNeeded(text: String): String {
-        val plainLines = text.lineSequence()
-            .map(String::trim)
-            .filter { it.isNotEmpty() && !it.startsWith('#') }
-            .toList()
-        if (plainLines.any { line -> SUPPORTED_SCHEMES.any { line.startsWith(it, true) } }) {
-            return text
+    private fun extractLinks(text: String): List<String> {
+        rejectUnsupportedConfigSchemes(text)
+        val matches = SUPPORTED_SCHEME_PATTERN.findAll(text).toList()
+        return matches.mapIndexed { index, match ->
+            val nextSchemeStart = matches.getOrNull(index + 1)?.range?.first ?: text.length
+            var end = match.range.first
+            while (end < nextSchemeStart && !text[end].isLinkBoundary()) {
+                end += 1
+            }
+            text.substring(match.range.first, end)
+                .trimEnd(*TRAILING_LINK_WRAPPERS)
+                .takeIf(String::isNotEmpty)
+                ?: throw ImportException("Обнаружена пустая ссылка.")
         }
-        val decoded = runCatching { decodeBase64(text.filterNot(Char::isWhitespace)) }.getOrNull()
-            ?: throw ImportException(SUPPORTED_MESSAGE)
-        val decodedLines = decoded.lineSequence()
-            .map(String::trim)
-            .filter { it.isNotEmpty() && !it.startsWith('#') }
-            .toList()
-        if (decodedLines.none { line -> SUPPORTED_SCHEMES.any { line.startsWith(it, true) } }) {
-            throw ImportException("В подписке нет поддерживаемых ссылок.")
-        }
-        return decoded
     }
+
+    private fun rejectUnsupportedConfigSchemes(text: String) {
+        URI_SCHEME_PATTERN.findAll(text).forEach { match ->
+            val scheme = match.groupValues[1].lowercase()
+            if (scheme !in SUPPORTED_SCHEME_NAMES && scheme !in NON_CONFIG_SCHEMES) {
+                throw ImportException("Найдена неподдерживаемая схема $scheme://; импорт остановлен.")
+            }
+        }
+    }
+
+    private fun decodeSubscription(text: String): String =
+        runCatching { decodeBase64(text.filterNot(Char::isWhitespace)) }.getOrElse {
+            throw ImportException(SUPPORTED_MESSAGE, it)
+        }
+
+    private fun Char.isLinkBoundary(): Boolean =
+        isWhitespace() || isISOControl() || this in LINK_BOUNDARIES
 
     private const val SUPPORTED_MESSAGE =
         "Поддерживаются JSON, WireGuard/AWG .conf, VLESS, VMess, Trojan, Shadowsocks, Hysteria2 и TUIC."
-    private val SUPPORTED_SCHEMES = listOf(
-        "vless://",
-        "vmess://",
-        "trojan://",
-        "ss://",
-        "hysteria2://",
-        "hy2://",
-        "tuic://",
+    private val SUPPORTED_SCHEME_NAMES = setOf(
+        "vless",
+        "vmess",
+        "trojan",
+        "ss",
+        "hysteria2",
+        "hy2",
+        "tuic",
     )
+    private val NON_CONFIG_SCHEMES = setOf("http", "https", "tg")
+    private val SUPPORTED_SCHEME_PATTERN =
+        Regex("(?i)(?:vless|vmess|trojan|ss|hysteria2|hy2|tuic)://")
+    private val URI_SCHEME_PATTERN = Regex("(?i)\\b([a-z][a-z0-9+.-]*)://")
+    private val LINK_BOUNDARIES = charArrayOf('"', '\'', '`', '<', '>', '\u200B')
+    private val TRAILING_LINK_WRAPPERS = charArrayOf(',', ';', '.', ')', ']', '}')
 }
 
 object ShareLinkParser {
@@ -507,9 +524,14 @@ class AndroidImportReader(private val context: Context) {
         val clip = clipboard.primaryClip
             ?: throw ImportException("Буфер обмена пуст.")
         if (clip.itemCount == 0) throw ImportException("Буфер обмена пуст.")
-        val text = clip.getItemAt(0).coerceToText(context)?.toString()
-            ?.takeIf(String::isNotBlank)
-            ?: throw ImportException("В буфере нет текста.")
+        val text = buildList {
+            for (index in 0 until clip.itemCount) {
+                clip.getItemAt(index).coerceToText(context)?.toString()
+                    ?.takeIf(String::isNotBlank)
+                    ?.let(::add)
+            }
+        }.joinToString("\n")
+        if (text.isBlank()) throw ImportException("В буфере нет текста.")
         if (text.toByteArray(Charsets.UTF_8).size > MAX_IMPORT_BYTES) {
             throw ImportException("Текст в буфере больше 4 МБ.")
         }
