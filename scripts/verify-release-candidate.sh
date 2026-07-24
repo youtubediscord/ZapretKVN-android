@@ -88,6 +88,11 @@ for kind in ("activity", "activity-alias", "service", "provider", "receiver"):
 exported = {(kind, name, permission) for kind, name, value, permission in components if value == "true"}
 expected_exported = {
     ("activity", "io.github.zapretkvn.android.MainActivity", None),
+    (
+        "service",
+        "io.github.zapretkvn.android.vpn.ZapretQuickSettingsTileService",
+        "android.permission.BIND_QUICK_SETTINGS_TILE",
+    ),
     ("receiver", "androidx.profileinstaller.ProfileInstallReceiver", "android.permission.DUMP"),
 }
 if exported != expected_exported:
@@ -96,6 +101,18 @@ if exported != expected_exported:
 vpn = [item for item in components if item[0] == "service" and item[3] == "android.permission.BIND_VPN_SERVICE"]
 if len(vpn) != 1 or vpn[0][1] != "io.github.zapretkvn.android.vpn.ZapretVpnService" or vpn[0][2] != "false":
     raise SystemExit("Release VPN service contract mismatch")
+quick_settings_tiles = [
+    item
+    for item in components
+    if item[0] == "service" and item[3] == "android.permission.BIND_QUICK_SETTINGS_TILE"
+]
+if (
+    len(quick_settings_tiles) != 1
+    or quick_settings_tiles[0][1]
+    != "io.github.zapretkvn.android.vpn.ZapretQuickSettingsTileService"
+    or quick_settings_tiles[0][2] != "true"
+):
+    raise SystemExit("Release Quick Settings tile service contract mismatch")
 providers = [item for item in components if item[0] == "provider" and item[1] == "androidx.core.content.FileProvider"]
 if len(providers) != 1 or providers[0][2] != "false":
     raise SystemExit("FileProvider must be unique and non-exported")

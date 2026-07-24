@@ -168,6 +168,28 @@ always_on_metadata = [
 if len(always_on_metadata) != 1 or always_on_metadata[0].get(android + "value") != "false":
     raise SystemExit("VPN service must explicitly opt out of Always-on")
 
+quick_settings_tiles = [
+    node for node in application.findall("service")
+    if node.get(android + "permission") == "android.permission.BIND_QUICK_SETTINGS_TILE"
+]
+if len(quick_settings_tiles) != 1:
+    raise SystemExit(
+        f"Expected exactly one Quick Settings tile service, found {len(quick_settings_tiles)}"
+    )
+quick_settings_tile = quick_settings_tiles[0]
+if (
+    quick_settings_tile.get(android + "name") != ".vpn.ZapretQuickSettingsTileService"
+    or quick_settings_tile.get(android + "exported") != "true"
+):
+    raise SystemExit("Quick Settings tile must be the single exported system-bound tile service")
+tile_actions = {
+    action.get(android + "name")
+    for intent_filter in quick_settings_tile.findall("intent-filter")
+    for action in intent_filter.findall("action")
+}
+if tile_actions != {"android.service.quicksettings.action.QS_TILE"}:
+    raise SystemExit(f"Quick Settings tile intent actions differ: {sorted(tile_actions)}")
+
 providers = [
     node for node in application.findall("provider")
     if node.get(android + "name") == "androidx.core.content.FileProvider"
