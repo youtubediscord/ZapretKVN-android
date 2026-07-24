@@ -99,6 +99,18 @@ jobs:
           ZAPRET_SIGNING_KEY_PASSWORD: ${{ secrets.ANDROID_SIGNING_KEY_PASSWORD }}
         run: scripts/ci-build.sh
 
+      - name: Free runner disk for Android emulator
+        shell: bash
+        run: |
+          df -h /
+          sudo rm -rf -- \
+            /usr/share/dotnet \
+            /opt/ghc \
+            /usr/local/share/boost \
+            /opt/hostedtoolcache/CodeQL
+          sudo apt-get clean
+          df -h /
+
       - name: Run Android and no-background-traffic gates
         shell: bash
         run: |
