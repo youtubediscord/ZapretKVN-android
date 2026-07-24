@@ -422,7 +422,9 @@ class VpnHealthPipeline(
         val detail = failures.joinToString("; ").take(MAX_HTTPS_FAILURE_DETAIL_CHARS)
         throw HttpsProbeFailure(
             diagnosticDetail = detail,
-            message = "HTTPS-проверка через VPN не прошла: $detail.",
+            message = "HTTPS-проверка через VPN не прошла: $detail. " +
+                "Причиной может быть недоступный или заблокированный сервер, " +
+                "отключённый ключ либо неверные параметры транспорта.",
             cause = lastError,
         )
     }

@@ -40,7 +40,14 @@ class DiagnosticModelsTest {
                 "WireGuard data-plane не прошёл проверку TCP/TLS.",
             ),
         )
+        assertEquals(
+            DiagnosticErrorType.VpnAccess,
+            DiagnosticFailureClassifier.classify(
+                "VPN-сервер явно отклонил ключ или учётные данные.",
+            ),
+        )
         assertEquals("VPN-200", DiagnosticErrorType.VpnTraffic.supportCode)
+        assertEquals("AUTH-100", DiagnosticErrorType.VpnAccess.supportCode)
         assertEquals("DNS-100", DiagnosticErrorType.SystemDns.supportCode)
         assertEquals(
             DiagnosticErrorType.entries.size,

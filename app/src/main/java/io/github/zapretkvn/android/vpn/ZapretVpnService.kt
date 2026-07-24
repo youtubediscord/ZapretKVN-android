@@ -952,9 +952,15 @@ class ZapretVpnService : VpnService() {
 
     private suspend fun failLocked(token: Long, error: Throwable, startId: Int) {
         cancelScheduledNetworkRestart()
+        val failure = VpnAccessFailureClassifier.refine(
+            failure = safeError(error),
+            startupCoreLogs = controller.diagnostics.value.connectionAttempt
+                ?.takeIf { it.generation == token }
+                ?.startupCoreLogs
+                .orEmpty(),
+        )
         detachSessions().forEach(ActiveSession::close)
         terminalError = true
-        val failure = safeError(error)
         finishForeground()
         controller.publish(token, failure)
         if (startId > 0) stopSelfResult(startId) else stopSelf()

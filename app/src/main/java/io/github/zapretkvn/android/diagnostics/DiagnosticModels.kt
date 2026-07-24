@@ -12,6 +12,7 @@ enum class DiagnosticErrorType(
     VpnServer("vpn_server", "VPN-сервер", "SRV-100"),
     VpnDns("vpn_dns", "DNS через VPN", "DNS-200"),
     VpnTraffic("vpn_traffic", "Трафик через VPN", "VPN-200"),
+    VpnAccess("vpn_access", "Ключ или доступ VPN", "AUTH-100"),
     CaptivePortal("captive_portal", "Авторизация Wi-Fi", "NET-110"),
     Core("core", "Ядро sing-box", "CORE-100"),
     AndroidNetwork("android_network", "Сеть Android", "NET-100"),
@@ -24,6 +25,7 @@ object DiagnosticFailureClassifier {
         return when {
             "always-on" in value || "lockdown" in value -> DiagnosticErrorType.Permission
             "private dns" in value -> DiagnosticErrorType.PrivateDns
+            "vpn-сервер явно отклонил ключ" in value -> DiagnosticErrorType.VpnAccess
             "авторизац" in value || "captive" in value -> DiagnosticErrorType.CaptivePortal
             "разрешение" in value && "vpn" in value -> DiagnosticErrorType.Permission
             "https-провер" in value ||
