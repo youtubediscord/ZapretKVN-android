@@ -406,16 +406,19 @@ object RuntimeConfigBuilder {
     }
 
     private fun secureDnsServers(proxyTag: String): List<JsonObject> = listOf(
-        dohServer(DOH_1_TAG, "1.1.1.1", "cloudflare-dns.com", proxyTag),
+        dohServer(DOH_1_TAG, "9.9.9.9", "dns.quad9.net", proxyTag),
         dohServer(DOH_2_TAG, "8.8.8.8", "dns.google", proxyTag),
         dohServer(DOH_3_TAG, "208.67.222.222", "dns.opendns.com", proxyTag),
+        dohServer(DOH_4_TAG, "1.1.1.1", "cloudflare-dns.com", proxyTag),
+        dohServer(DOH_5_TAG, "77.88.8.8", "common.dot.dns.yandex.net", proxyTag),
         buildJsonObject {
             put("type", "fallback")
             put("tag", SECURE_DNS_TAG)
             put(
                 "servers",
                 JsonArray(
-                    listOf(DOH_1_TAG, DOH_2_TAG, DOH_3_TAG).map(::JsonPrimitive),
+                    listOf(DOH_1_TAG, DOH_2_TAG, DOH_3_TAG, DOH_4_TAG, DOH_5_TAG)
+                        .map(::JsonPrimitive),
                 ),
             )
             // A sequential transport cannot advance when the first DoH hangs until the
@@ -786,6 +789,8 @@ object RuntimeConfigBuilder {
     private const val DOH_1_TAG = "zapret-doh-1"
     private const val DOH_2_TAG = "zapret-doh-2"
     private const val DOH_3_TAG = "zapret-doh-3"
+    private const val DOH_4_TAG = "zapret-doh-4"
+    private const val DOH_5_TAG = "zapret-doh-5"
     private const val SECURE_DNS_TAG = "zapret-secure-dns"
     private const val BOOTSTRAP_DNS_TAG = "zapret-bootstrap-lkg"
     private const val DNS_OVERRIDE_TAG = "zapret-dns-override"
@@ -795,6 +800,8 @@ object RuntimeConfigBuilder {
         DOH_1_TAG,
         DOH_2_TAG,
         DOH_3_TAG,
+        DOH_4_TAG,
+        DOH_5_TAG,
         SECURE_DNS_TAG,
         BOOTSTRAP_DNS_TAG,
         DNS_OVERRIDE_TAG,

@@ -527,14 +527,24 @@ class RuntimeConfigBuilderTest {
         val fallback = servers.first { it.string("tag") == "zapret-secure-dns" }
 
         assertEquals("parallel", fallback.string("strategy"))
-        assertEquals("1.1.1.1", servers.first { it.string("tag") == "zapret-doh-1" }.string("server"))
-        assertEquals("8.8.8.8", servers.first { it.string("tag") == "zapret-doh-2" }.string("server"))
-        assertEquals(
-            "208.67.222.222",
-            servers.first { it.string("tag") == "zapret-doh-3" }.string("server"),
+        val expected = listOf(
+            Triple("zapret-doh-1", "9.9.9.9", "dns.quad9.net"),
+            Triple("zapret-doh-2", "8.8.8.8", "dns.google"),
+            Triple("zapret-doh-3", "208.67.222.222", "dns.opendns.com"),
+            Triple("zapret-doh-4", "1.1.1.1", "cloudflare-dns.com"),
+            Triple("zapret-doh-5", "77.88.8.8", "common.dot.dns.yandex.net"),
         )
+        expected.forEach { (tag, address, serverName) ->
+            val server = servers.first { it.string("tag") == tag }
+            assertEquals(address, server.string("server"))
+            assertEquals(
+                serverName,
+                ((server["tls"] as JsonObject)["server_name"] as JsonPrimitive).content,
+            )
+            assertEquals("zapret-proxy", server.string("detour"))
+        }
         assertEquals(
-            listOf("zapret-doh-1", "zapret-doh-2", "zapret-doh-3"),
+            expected.map(Triple<String, String, String>::first),
             (fallback["servers"] as JsonArray).map { (it as JsonPrimitive).content },
         )
         assertFalse(servers.any { it.string("type") == "fakeip" })

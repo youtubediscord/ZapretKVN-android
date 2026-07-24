@@ -403,7 +403,7 @@ Runtime-копия каждого профиля, включая raw JSON и end
 - `CommandStatus` с интервалом 1 секунда включается только для видимой главной; `CommandConnections` не включается никогда; bounded `CommandLog` открывается на время connect health-check и затем только при видимой диагностике;
 - 60 значений графика — обычный кольцевой массив в памяти. Уведомление, фон и закрытый UI не обновляют график;
 - health-check выполняется при подключении и значимой смене сети, IP — один раз за соединение, ping — при подключении и вручную. Периодических проверок «на всякий случай» нет;
-- DNS cache остаётся включённым с capacity 4096. Только явный Secure или последний Auto-этап использует `parallel`: Cloudflare, Google и OpenDNS стартуют на cache miss, потому что `sequential` exact core не достигает резерва при зависании первого; успешный DNS профиля/Android не создаёт DoH-трафика;
+- DNS cache остаётся включённым с capacity 4096. Только явный Secure или последний Auto-этап использует `parallel`: Quad9, Google, OpenDNS, Cloudflare и Yandex стартуют на cache miss, потому что `sequential` exact core не достигает резерва при зависании первого; успешный DNS профиля/Android не создаёт DoH-трафика;
 - updater, подписки и импорт работают только после действия пользователя;
 - rootless hardening выполняется один раз при сборке runtime JSON и не создаёт scanner, timer, listener или отдельный process;
 - приложение не запрашивает `WAKE_LOCK` и исключение из battery optimization;

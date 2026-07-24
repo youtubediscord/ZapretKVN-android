@@ -299,20 +299,20 @@ DNS-решение внутри каждого managed Android/Secure этапа
       {
         "type": "https",
         "tag": "zapret-doh-1",
-        "server": "<LITERAL_DOH_IP_1>",
+        "server": "9.9.9.9",
         "tls": {
           "enabled": true,
-          "server_name": "<DOH_HOSTNAME_1>"
+          "server_name": "dns.quad9.net"
         },
         "detour": "<SELECTED_PROXY_OUTBOUND_TAG>"
       },
       {
         "type": "https",
         "tag": "zapret-doh-2",
-        "server": "<LITERAL_DOH_IP_2>",
+        "server": "8.8.8.8",
         "tls": {
           "enabled": true,
-          "server_name": "<DOH_HOSTNAME_2>"
+          "server_name": "dns.google"
         },
         "detour": "<SELECTED_PROXY_OUTBOUND_TAG>"
       },
@@ -327,12 +327,34 @@ DNS-решение внутри каждого managed Android/Secure этапа
         "detour": "<SELECTED_PROXY_OUTBOUND_TAG>"
       },
       {
+        "type": "https",
+        "tag": "zapret-doh-4",
+        "server": "1.1.1.1",
+        "tls": {
+          "enabled": true,
+          "server_name": "cloudflare-dns.com"
+        },
+        "detour": "<SELECTED_PROXY_OUTBOUND_TAG>"
+      },
+      {
+        "type": "https",
+        "tag": "zapret-doh-5",
+        "server": "77.88.8.8",
+        "tls": {
+          "enabled": true,
+          "server_name": "common.dot.dns.yandex.net"
+        },
+        "detour": "<SELECTED_PROXY_OUTBOUND_TAG>"
+      },
+      {
         "type": "fallback",
         "tag": "zapret-secure-dns",
         "servers": [
           "zapret-doh-1",
           "zapret-doh-2",
-          "zapret-doh-3"
+          "zapret-doh-3",
+          "zapret-doh-4",
+          "zapret-doh-5"
         ],
         "strategy": "parallel"
       }
@@ -380,7 +402,7 @@ DNS-решение внутри каждого managed Android/Secure этапа
 
 У DoH указан literal IP, а TLS hostname остаётся в `server_name`. Поэтому подключение к DoH не требует предварительно разрешать имя самого DoH. `detour` всегда заменяется тегом выбранного proxy/selector outbound, а не фиксированной строкой `proxy`.
 
-Только этот защищённый этап использует extended `fallback/parallel`. Три DoH-транспорта (Cloudflare, Google и OpenDNS) стартуют на cache miss и работают в одном bounded context; первый корректный DNS-пакет выигрывает, остальные вызовы отменяются. Это создаёт до трёх защищённых запросов на новый домен, но не затрагивает успешные profile/Android-этапы Auto. В exact core это единственный встроенный способ не потерять резервный DoH, когда основной завис до общего deadline. Кэш capacity 4096 ограничивает повторение этой цены. Периодического трафика, отдельного health-loop и plaintext fallback нет.
+Только этот защищённый этап использует extended `fallback/parallel`. Пять DoH-транспортов перечислены как Quad9, Google, OpenDNS, Cloudflare и Yandex, но на cache miss стартуют параллельно в одном bounded context; первый корректный DNS-пакет выигрывает, остальные вызовы отменяются. Это создаёт до пяти защищённых запросов на новый домен, но не затрагивает успешные profile/Android-этапы Auto. В exact core это единственный встроенный способ не потерять резервный DoH, когда основной завис до общего deadline. Кэш capacity 4096 ограничивает повторение этой цены. Периодического трафика, отдельного health-loop и plaintext fallback нет.
 
 `fallback` не оценивает DNS RCODE: `NXDOMAIN`, `SERVFAIL` или `REFUSED` являются корректным DNS-пакетом и могут выиграть гонку. Поэтому все managed endpoints должны быть равно доверенными и семантически взаимозаменяемыми. Пользовательский режим «Из JSON» сохраняет явно заданную стратегию без подмены.
 
@@ -611,7 +633,7 @@ Source-аудит отдельно подтвердил, что libbox package o
 - captive portal;
 - заблокирован системный DNS, есть/нет last-known-good;
 - Auto с DNS профиля: успех без Android/DoH, DNS error/timeout с переходом к Android, затем к DoH; HTTPS/proxy/JSON-ошибка не должна запускать DNS fallback; после каждой неудачной попытки ноль старых core/PFD/callback;
-- все три DoH стартуют на cache miss: один успешен/быстро недоступен/завис, все недоступны, первый корректный ответ выигрывает; отдельно проверяются гонки с `NXDOMAIN`/`SERVFAIL`/`REFUSED`;
+- все пять DoH стартуют на cache miss: один успешен/быстро недоступен/завис, все недоступны, первый корректный ответ выигрывает; отдельно проверяются гонки с `NXDOMAIN`/`SERVFAIL`/`REFUSED`;
 - proxy доступен по hostname и по IP;
 - каждый поддерживаемый MVP outbound отдельно проходит socket-protection/loop test; неаудированный backend отклоняется до `establish()`;
 - UDP и TCP DNS на 53; DoT/853, DoH/443, custom DNS port и mDNS/5353;

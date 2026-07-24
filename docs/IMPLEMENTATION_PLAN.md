@@ -166,7 +166,7 @@ portal и физической энергии не блокирует стату
 - [x] `I3-05B` Добавить одну глобальную редактируемую пару DNS override для managed-режимов, по умолчанию включённую как `ntc.party → 130.255.77.28`: `hosts` и точное правило стоят после `reject`, но до resolver rules; «Из JSON», routing, TLS/SNI и встроенный DoH не меняются, diagnostic не раскрывает пару.
 - [x] `I3-05C` В Auto использовать конечную цепочку `DNS профиля → DNS Android → DoH`: переходить только после typed DNS health failure, полностью закрывать предыдущие core/TUN/callbacks, не переключаться на ошибке JSON/proxy/HTTPS и не давать fallback явным режимам.
 - [x] `I3-06` Создать `RuntimeConfigBuilder`, который добавляет только `zapret-*` overlays и не меняет сохранённый JSON.
-- [x] `I3-07` В явном Secure и последнем Auto-этапе использовать реальные IP, `reverse_mapping`, cache 4096 и три DoH (Cloudflare, Google, OpenDNS) через `fallback/parallel`; exact `sequential` не достигает резерва при зависшем основном DoH; FakeIP не создавать.
+- [x] `I3-07` В явном Secure и последнем Auto-этапе использовать реальные IP, `reverse_mapping`, cache 4096 и пять DoH (Quad9, Google, OpenDNS, Cloudflare, Yandex) через `fallback/parallel`; exact `sequential` не достигает резерва при зависшем основном DoH; FakeIP не создавать.
 - [x] `I3-08` Брать внутренний DNS через `TunOptions.GetDNSServerAddress()` и передавать его в `VpnService.Builder.addDnsServer()`.
 - [x] `I3-09` Перехватывать стандартный DNS правилом port 53 / `hijack-dns`; не обещать перехват DoT, встроенного DoH и mDNS.
 - [x] `I3-10` При strict Private DNS блокировать managed Auto/Secure до `establish()`; DNS Android разрешать только при active+validated strict, иначе fail-close без plaintext fallback; «Из JSON» не переписывать.
