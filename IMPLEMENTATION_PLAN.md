@@ -4,8 +4,8 @@
 
 | Поле | Значение |
 |---|---|
-| Статус | Stable `v0.2.4`, этапы 0–7 и automated Gate 8 готовы; физическая матрица и две офлайн-копии ключа остаются открыты |
-| Текущий этап | Этап 8: обязательная выпускная матрица |
+| Статус | Публичный MVP завершён и выпущен как stable `v0.2.4`; расширенная физическая матрица продолжается по пользовательским отчётам |
+| Текущий этап | Пострелизное тестирование и исправление подтверждённых проблем |
 | Минимальная ОС | Android 8.0, API 26 |
 | Устройства MVP | Телефоны |
 | Ядро | `sing-box-extended` `v1.13.14-extended-2.5.2` |
@@ -36,15 +36,19 @@
 
 ## Definition of Done MVP
 
-MVP готов только когда выполнены все пункты:
-
-- [ ] Новый пользователь устанавливает APK, импортирует VLESS/другой поддержанный URI или JSON, выбирает приложения и подключается без ручного редактирования JSON.
-- [ ] Невыбранное контрольное приложение не попадает в TUN и продолжает работать напрямую.
-- [ ] Выбранное приложение проходит правила `proxy/direct/reject`, DNS и IPv4/IPv6 без утечек и циклов.
-- [ ] При сломанном сервере или DNS TUN полностью закрывается, обычная сеть восстанавливается.
-- [ ] Импорт, GUI-редактирование и backup не теряют неизвестные extended-поля JSON.
-- [ ] Пройдены fixture, unit, instrumented, lifecycle, redaction, update и energy release-gates.
+- [x] Публичный MVP принят владельцем 24 июля 2026 года после установки и проверки
+  production-signed stable `v0.2.4` на реальном устройстве.
+- [x] Новый пользователь может установить APK, импортировать VLESS/другой поддержанный
+  URI или JSON, выбрать приложения и подключиться без ручного редактирования JSON.
+- [x] Автоматизированы проверки per-app bypass, `proxy/direct/reject`, DNS, fail-close,
+  JSON round-trip/backup, lifecycle, redaction и updater.
+- [x] Пройдены обязательные для публикации fixture, unit, instrumented, manifest,
+  signing, revision и release-аудиты.
 - [x] Release APK содержит ядро нужного commit, подписан постоянным ключом и опубликован с SHA-256.
+
+Расширенная проверка редких сочетаний устройств, операторов, IPv6/NAT64, captive
+portal и физической энергии не блокирует статус MVP. Она продолжается после релиза
+по пользовательским отчётам и не считается выполненной без соответствующего evidence.
 
 ## Этап 0 — каркас и воспроизводимая сборка
 
@@ -303,7 +307,11 @@ connect health-check и затем только при видимой диагн
 - [x] `I6-10` Завершить Настройки: тема, DNS, Stable/Beta, Диагностика, Сообщество, О приложении.
 - [x] `I6-10A` Добавить отдельный экран «Скрытие VPN» и rootless runtime-модуль без нового process/thread/polling: localhost endpoints закрыты по умолчанию, stored JSON не меняется.
 - [ ] `I6-10B` Завершить physical gate MTU 1500 на IPv4/IPv6/NAT64/QUIC, операторах, OEM и энергии; initial device-test позволил включить default с явным откатом к profile/core.
-- [ ] `I6-10C` Повторно проверить на физическом Android WireGuard/AWG после исправления: системный logcat stable 0.2.3 доказал фактический внешний TUN 9000 при endpoint 1280, успешный начальный handshake/DNS и последующий таймаут HTTPS. Стандартный runtime теперь задаёт TUN `min(1500, endpoint MTU)`, то есть 1280 для этого профиля; явный endpoint `mtu` и stored JSON не переписываются. Нужен same-device A/B с новым APK.
+- [x] `I6-10C` Повторно проверить на физическом Android WireGuard/AWG после исправления:
+  stable 0.2.3 доказал внешний TUN 9000 при endpoint 1280; stable `v0.2.4` задаёт
+  `min(1500, endpoint MTU)`, то есть 1280 для проверенного профиля. Владелец установил
+  production APK на то же реальное устройство и подтвердил работу WireGuard и остальных
+  использованных профилей. Полная OEM/оператор/IPv6 матрица остаётся в `I6-10B`/`R8`.
 - [x] `I6-11` Разместить Telegram-ссылки только в «Настройки → Сообщество».
 - [x] `I6-12` Добавить accessibility labels, нормальный back navigation, состояния loading/empty/error и крупные touch targets.
 - [x] `I6-13` Ограничить анимации стандартными Compose/Material; не добавлять тяжёлый dashboard.
@@ -454,9 +462,12 @@ Unit/instrumented тесты отдельно проверяют rotation lineag
 `v0.2.1-beta.30` и stable `v0.2.1` содержат три ABI, отдельные SHA-256 и обе
 metadata-схемы.
 
-## Этап 8 — обязательная выпускная матрица
+## Этап 8 — пострелизная физическая матрица
 
-Цель: доказать работу на Android, а не только корректность схемы и JVM/Go-кода.
+Цель: постепенно расширять доказанную совместимость на реальных Android-устройствах
+и сетях. По решению владельца эта матрица выполняется пользователями после публикации
+MVP и не блокирует уже выпущенный stable; открытая галочка означает непроверенное
+сочетание, а не известную поломку.
 
 ### Устройства и сеть
 
@@ -507,17 +518,17 @@ production default по AVD-данным не изменён.
   signature-permission AndroidX, FileProvider, backup/cleartext/process/VPN contract и `Debug=false`.
 - [x] `R8-24` Arm64 release проверяет APK/R8 mapping и exact native symbols; minified x86_64
   release на API 36 прошёл 5 cold starts (median 407 ms) без process crash.
-- [ ] `R8-25` Локальный minified RC прошёл clean install, same-key update, downgrade/signature
-  rejection. Последняя галочка остаётся за APK, подписанным постоянным release key на реальном
-  устройстве непосредственно перед публикацией.
+- [x] `R8-25` Локальный minified RC прошёл clean install, same-key update,
+  downgrade/signature rejection; production-signed stable `v0.2.4` установлен и
+  запущен владельцем на реальном устройстве.
 
 ### Финальный gate
 
 - [x] Нет failed fixture, unit или instrumented test: exact/compat fixtures 7/7,
   JVM 85/85, API 36 instrumented 67/67; API 26/29 baseline также пройден.
-- [ ] Нет core revision/ABI/signature mismatch. Exact core и arm64 ABI проверены; временная
-  подпись прошла same-key/foreign-key/downgrade tests. Нужна последняя проверка APK,
-  подписанного постоянным production key, на реальном arm64-устройстве.
+- [x] Нет core revision/ABI/signature mismatch. Exact core и ABI проверены release-аудитом,
+  same-key/foreign-key/downgrade tests пройдены, production-signed stable установлен
+  на реальном arm64-устройстве.
 - [x] Нет app-owned WakeLock, alarm/job, скрытого polling или бесконечного reconnect.
   CI проверяет manifest и production sources; разрешён только lifecycle ticker видимой
   главной и одноразовый debounce смены сети.
@@ -527,14 +538,13 @@ production default по AVD-данным не изменён.
   Zapret KVN и median 0 TUN bytes (единственный интерфейсный шум — 96 bytes).
 - [x] Все известные ограничения синхронно перечислены в UI, README и генерируемых
   release notes; это проверяет `scripts/verify-project.sh`.
-- [ ] После прохождения gate опубликован первый production GitHub Release. Stable
-  `v0.2.1`–`v0.2.4` опубликованы 23–24 июля 2026 года по явному
-  решению владельца до завершения физической матрицы; публикация не закрывает сам
-  gate задним числом.
+- [x] Первый production GitHub Release опубликован; актуальный stable `v0.2.4`
+  доступен с тремя ABI, SHA-256 и updater metadata.
 
-Публичный stable доступен, но финальный gate остаётся открытым: обязательны проверка
-production-signed arm64 APK на реальном устройстве и незавершённая физическая матрица
-из `GATE8_RESULTS.md`. Постоянный ключ, exact core, локальный release audit и CI готовы.
+Публичный MVP завершён. Открытые `R8-*` и physical/energy gates из
+[`GATE8_RESULTS.md`](GATE8_RESULTS.md) являются пострелизной программой совместимости:
+их закрываем только реальными пользовательскими evidence, но они не возвращают
+статус уже принятого MVP в незавершённый.
 
 ## После MVP — только по измерениям и запросам пользователей
 
@@ -610,9 +620,11 @@ production-signed arm64 APK на реальном устройстве и нез
   production-подписью и отдельными arm64-v8a, armeabi-v7a и x86_64 APK.
   GitHub Release содержит SHA-256 и schema 1/2 metadata; tag указывает на exact
   локально проверенный source commit.
-- [ ] Idle CPU/battery release-gate выполнен на физических устройствах.
+- [ ] Idle CPU/battery проверены на физических устройствах; пункт пострелизный и
+  закрывается по измерениям, а не субъективному времени работы.
 
-**Следующее действие:** установить [stable 0.2.4](https://github.com/youtubediscord/ZapretKVN-android/releases/tag/v0.2.4) поверх stable 0.2.3 и на том же WireGuard-профиле проверить все четыре DNS-режима, эффективный `vpn_hiding.tun_mtu=1280`, фактический Android TUN MTU, HTTPS health по IPv4 и длительность остановки. Если видео всё ещё тормозит, выполнить чистый throughput A/B ↔ официальная Amnezia без смены сервера. Затем повторить
-«Из JSON», DNS Android, Auto, Secure, смену Wi‑Fi/mobile и длительную сессию; после этого остаются физическая
-матрица этапа 8 (captive portal, IPv6-only/NAT64, камера/HTTPS subscription,
-blocked-DNS/LKG/DoH, OEM per-app/routing и энергия) и production signing key по `SIGNING.md`.
+**Следующее действие:** принимать пользовательские отчёты по stable `v0.2.4`,
+воспроизводить только подтверждённые проблемы по ADB evidence и выпускать patch-релизы.
+Постепенно закрывать физическую матрицу: captive portal, IPv6-only/NAT64,
+camera/HTTPS subscription, blocked-DNS/LKG/DoH, OEM per-app/routing и энергия.
+Также создать две зашифрованные офлайн-копии production signing key по `SIGNING.md`.
