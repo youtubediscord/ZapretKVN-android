@@ -26,7 +26,7 @@ class AppCatalog(context: Context) {
         val browserPackages = installedBrowserPackages()
         val telegramPackages = installedTelegramPackages()
         val youtubePackages = installedYouTubePackages()
-        installedApplications()
+        catalogApplications()
             .asSequence()
             .filterNot { it.packageName == appContext.packageName }
             .map { application ->
@@ -79,9 +79,37 @@ class AppCatalog(context: Context) {
 
     private fun handlerPackages(vararg intents: Intent): Set<String> = intents
         .asSequence()
-        .flatMap { intent -> resolveActivities(intent).asSequence() }
+        .flatMap { intent ->
+            runCatching { resolveActivities(intent) }
+                .getOrDefault(emptyList())
+                .asSequence()
+        }
         .mapNotNull { it.activityInfo?.packageName }
         .toSet()
+
+    private fun catalogApplications(): List<ApplicationInfo> {
+        val applicationsByPackage = linkedMapOf<String, ApplicationInfo>()
+        val sources = listOf(
+            ::installedApplications,
+            ::installedPackageApplications,
+            ::launcherApplications,
+        )
+        sources.forEach { source ->
+            runCatching(source)
+                .getOrDefault(emptyList())
+                .forEach { application ->
+                    applicationsByPackage.putIfAbsent(application.packageName, application)
+                }
+        }
+        return applicationsByPackage.values.toList()
+    }
+
+    private fun launcherApplications(): List<ApplicationInfo> = listOf(
+        Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER),
+        Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LEANBACK_LAUNCHER),
+    ).flatMap { intent ->
+        resolveActivities(intent).mapNotNull { it.activityInfo?.applicationInfo }
+    }
 
     @Suppress("DEPRECATION")
     private fun resolveActivities(intent: Intent): List<ResolveInfo> =
@@ -105,6 +133,18 @@ class AppCatalog(context: Context) {
         } else {
             packageManager.getInstalledApplications(PackageManager.MATCH_DISABLED_COMPONENTS)
         }
+
+    @Suppress("DEPRECATION")
+    private fun installedPackageApplications(): List<ApplicationInfo> =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            packageManager.getInstalledPackages(
+                PackageManager.PackageInfoFlags.of(
+                    PackageManager.MATCH_DISABLED_COMPONENTS.toLong(),
+                ),
+            )
+        } else {
+            packageManager.getInstalledPackages(PackageManager.MATCH_DISABLED_COMPONENTS)
+        }.mapNotNull { it.applicationInfo }
 }
 
 object PopularAppSuggestions {

@@ -148,6 +148,27 @@ if source_permissions != expected_source_permissions:
         f"Source manifest permission allowlist mismatch: "
         f"{sorted(source_permissions ^ expected_source_permissions)}"
     )
+queries = root.find("queries")
+if queries is None:
+    raise SystemExit("Manifest must declare launcher package visibility fallback")
+query_intents = set()
+for intent in queries.findall("intent"):
+    actions = tuple(sorted(
+        node.get(android + "name") for node in intent.findall("action")
+    ))
+    categories = tuple(sorted(
+        node.get(android + "name") for node in intent.findall("category")
+    ))
+    query_intents.add((actions, categories))
+expected_query_intents = {
+    (("android.intent.action.MAIN",), ("android.intent.category.LAUNCHER",)),
+    (("android.intent.action.MAIN",), ("android.intent.category.LEANBACK_LAUNCHER",)),
+}
+if query_intents != expected_query_intents:
+    raise SystemExit(
+        f"Launcher package visibility queries mismatch: "
+        f"{sorted(query_intents ^ expected_query_intents)}"
+    )
 profileable = application.findall("profileable")
 if len(profileable) != 1 or profileable[0].get(android + "shell") != "true":
     raise SystemExit("Release-gate profiling requires exactly one shell-profileable declaration")
