@@ -21,10 +21,8 @@ import java.nio.charset.StandardCharsets
 import java.util.Base64
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
-import kotlinx.serialization.json.longOrNull
 
 sealed interface ImportCandidate {
     val suggestedName: String
@@ -397,46 +395,12 @@ object ShareLinkParser {
                 path = query["path"],
                 host = query["host"],
                 mode = query["mode"],
-                xhttpOptions = xhttpOptions(query["extra"]),
+                xhttpOptions = XtlsXhttpExtraConverter.convert(query["extra"]),
             )
         } else {
             throw ImportException("Transport '$type' пока не поддерживается.")
         }
         else -> throw ImportException("Transport '$type' пока не поддерживается.")
-    }
-
-    private fun xhttpOptions(encoded: String?): JsonObject? {
-        if (encoded.isNullOrBlank()) return null
-        val source = try {
-            JsonConfig.parse(decodeBase64(encoded)) as? JsonObject
-                ?: throw ImportException("XHTTP extra должен быть JSON-объектом.")
-        } catch (error: ImportException) {
-            throw error
-        } catch (error: Exception) {
-            throw ImportException("Не удалось разобрать XHTTP extra.", error)
-        }
-        val options = linkedMapOf<String, kotlinx.serialization.json.JsonElement>()
-
-        source.boolean("noGRPCHeader")?.let { options["no_grpc_header"] = JsonPrimitive(it) }
-        source.string("xPaddingBytes")?.let { options["x_padding_bytes"] = JsonPrimitive(it) }
-        source.string("scMaxEachPostBytes")
-            ?.let { options["sc_max_each_post_bytes"] = JsonPrimitive(it) }
-        source.string("scMinPostsIntervalMs")
-            ?.let { options["sc_min_posts_interval_ms"] = JsonPrimitive(it) }
-        source.string("scStreamUpServerSecs")
-            ?.let { options["sc_stream_up_server_secs"] = JsonPrimitive(it) }
-
-        (source["xmux"] as? JsonObject)?.let { xmuxSource ->
-            val xmux = linkedMapOf<String, kotlinx.serialization.json.JsonElement>()
-            XMUX_RANGE_FIELDS.forEach { (sourceKey, targetKey) ->
-                xmuxSource.string(sourceKey)?.let { xmux[targetKey] = JsonPrimitive(it) }
-            }
-            xmuxSource.long("hKeepAlivePeriod")
-                ?.let { xmux["h_keep_alive_period"] = JsonPrimitive(it) }
-            if (xmux.isNotEmpty()) options["xmux"] = JsonObject(xmux)
-        }
-
-        return options.takeIf(Map<*, *>::isNotEmpty)?.let(::JsonObject)
     }
 
     private fun query(uri: URI): Map<String, String> = uri.rawQuery
@@ -475,22 +439,6 @@ object ShareLinkParser {
         return primitive.intOrNull ?: primitive.contentOrNull?.toIntOrNull()
     }
 
-    private fun JsonObject.string(key: String): String? =
-        (this[key] as? JsonPrimitive)?.contentOrNull
-
-    private fun JsonObject.boolean(key: String): Boolean? =
-        (this[key] as? JsonPrimitive)?.booleanOrNull
-
-    private fun JsonObject.long(key: String): Long? =
-        (this[key] as? JsonPrimitive)?.longOrNull
-
-    private val XMUX_RANGE_FIELDS = mapOf(
-        "cMaxReuseTimes" to "c_max_reuse_times",
-        "maxConcurrency" to "max_concurrency",
-        "maxConnections" to "max_connections",
-        "hMaxRequestTimes" to "h_max_request_times",
-        "hMaxReusableSecs" to "h_max_reusable_secs",
-    )
 }
 
 class AndroidImportReader(private val context: Context) {

@@ -6,7 +6,7 @@
 | Поле | Значение |
 |---|---|
 | Статус | WireGuard/AmneziaWG `.conf` реализован; Clash YAML исследован и отложен |
-| Последний аудит | 22 июля 2026 года |
+| Последний аудит | 24 июля 2026 года |
 | Ядро | `sing-box-extended` `ff11f007ec798136a5de258f947a4f34011a37ea` |
 | Источник сетевой истины | Только итоговый sing-box JSON профиля |
 
@@ -39,6 +39,27 @@
 с preview полного количества серверов. Найденная конфигурационная URI-схема,
 которую приложение не поддерживает, останавливает импорт явной ошибкой, чтобы
 частичный результат нельзя было принять за полный.
+
+## F-IMPORT-XHTTP — VLESS XHTTP URI
+
+Граница конвертации разделяет два формата:
+
+- вход соответствует XTLS VLESS share-link: `extra` — JSON-объект, целиком
+  обработанный `encodeURIComponent`, а не Base64;
+- выход соответствует `V2RayXHTTPOptions` закреплённого sing-box-extended:
+  camelCase-поля XTLS явно преобразуются в snake_case-поля transport JSON.
+
+Поддерживаются `headers`, padding/session/sequence/uplink options,
+`noGRPCHeader`, `noSSEHeader`, packet/stream limits и все поля `xmux`, которые
+есть в закреплённой схеме core. Типы JSON не превращаются в строки: ranges могут
+остаться строками, а числа и bool — числами и bool. Неизвестное поле завершает
+импорт явной ошибкой вместо silent drop.
+
+Link parser закреплённого core здесь не является источником синтаксиса входной
+ссылки: в commit `ff11f007` его XHTTP-ветка ошибочно ожидает Base64. Источник
+истины для URI — [XTLS share-link proposal](https://github.com/XTLS/Xray-core/discussions/716),
+а источник истины для результата —
+[точная схема `V2RayXHTTPOptions`](https://github.com/shtorm-7/sing-box-extended/blob/ff11f007ec798136a5de258f947a4f34011a37ea/option/v2ray_transport.go).
 
 ## F-IMPORT-WG — WireGuard и AmneziaWG 2.0 `.conf`
 

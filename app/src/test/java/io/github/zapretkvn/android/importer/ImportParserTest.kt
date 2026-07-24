@@ -12,6 +12,8 @@ import io.github.zapretkvn.android.profiles.ManagedProfileFactory
 import io.github.zapretkvn.android.profiles.ProfileSource
 import io.github.zapretkvn.android.profiles.ProtocolOutboundBuilders
 import io.github.zapretkvn.android.profiles.TlsSettings
+import java.net.URLEncoder
+import java.nio.charset.StandardCharsets
 import java.util.Base64
 import kotlin.random.Random
 import kotlinx.serialization.json.JsonArray
@@ -259,10 +261,9 @@ class ImportParserTest {
     }
 
     @Test
-    fun `vless xhttp maps mode host path alpn and extra to sing box transport`() {
-        val extra = Base64.getUrlEncoder().withoutPadding().encodeToString(
-            """{"xmux":{"maxConcurrency":"16-32","hKeepAlivePeriod":"10"},"noGRPCHeader":true,"xPaddingBytes":"100-1000","scMaxEachPostBytes":"1000000"}"""
-                .toByteArray(),
+    fun `vless xhttp maps XTLS URL encoded extra to pinned sing box transport`() {
+        val extra = encodeURIComponent(
+            """{"headers":{"Referer":"https://cdn.example/a+b"},"xmux":{"maxConcurrency":"16-32","hKeepAlivePeriod":10},"noGRPCHeader":true,"noSSEHeader":true,"xPaddingBytes":"100-1000","scMaxEachPostBytes":1000000,"scMinPostsIntervalMs":"20-40","scMaxBufferedPosts":30,"xPaddingPlacement":"header","uplinkHTTPMethod":"POST"}""",
         )
         val candidate = ImportParser.parse(
             "vless://11111111-1111-4111-8111-111111111111@xhttp.example:443" +
@@ -274,13 +275,21 @@ class ImportParserTest {
         val transport = outbound["transport"] as JsonObject
         val tls = outbound["tls"] as JsonObject
         val xmux = transport["xmux"] as JsonObject
+        val headers = transport["headers"] as JsonObject
 
         assertEquals("xhttp", transport.string("type"))
         assertEquals("stream-up", transport.string("mode"))
         assertEquals("/api", transport.string("path"))
         assertEquals("cdn.example", transport.string("host"))
         assertEquals("true", (transport["no_grpc_header"] as JsonPrimitive).content)
+        assertEquals("true", (transport["no_sse_header"] as JsonPrimitive).content)
         assertEquals("100-1000", transport.string("x_padding_bytes"))
+        assertEquals("1000000", (transport["sc_max_each_post_bytes"] as JsonPrimitive).content)
+        assertEquals("20-40", transport.string("sc_min_posts_interval_ms"))
+        assertEquals("30", (transport["sc_max_buffered_posts"] as JsonPrimitive).content)
+        assertEquals("header", transport.string("x_padding_placement"))
+        assertEquals("POST", transport.string("uplink_http_method"))
+        assertEquals("https://cdn.example/a+b", headers.string("Referer"))
         assertEquals("16-32", xmux.string("max_concurrency"))
         assertEquals("10", (xmux["h_keep_alive_period"] as JsonPrimitive).content)
         assertEquals(
@@ -300,6 +309,39 @@ class ImportParserTest {
 
         assertEquals("xhttp", transport.string("type"))
         assertEquals("100-1000", transport.string("x_padding_bytes"))
+    }
+
+    @Test
+    fun `vless xhttp rejects nonstandard Base64 extra instead of misreading XTLS`() {
+        val extra = Base64.getUrlEncoder().withoutPadding().encodeToString(
+            """{"xPaddingBytes":"100-1000"}""".toByteArray(),
+        )
+        val error = assertThrows(ImportException::class.java) {
+            ImportParser.parse(
+                "vless://11111111-1111-4111-8111-111111111111@xhttp.example:443" +
+                    "?security=tls&type=xhttp&extra=$extra#XHTTP",
+                ProfileSource.Clipboard,
+            )
+        }
+
+        assertTrue(error.message.orEmpty().contains("URL-кодированным JSON-объектом"))
+    }
+
+    @Test
+    fun `vless xhttp rejects fields absent from pinned core instead of dropping them`() {
+        val extra = encodeURIComponent("""{"futureOption":true}""")
+        val error = assertThrows(ImportException::class.java) {
+            ImportParser.parse(
+                "vless://11111111-1111-4111-8111-111111111111@xhttp.example:443" +
+                    "?security=tls&type=xhttp&extra=$extra#XHTTP",
+                ProfileSource.Clipboard,
+            )
+        }
+
+        assertEquals(
+            "XHTTP extra содержит неподдерживаемые поля: futureOption.",
+            error.message,
+        )
     }
 
     @Test(timeout = 5_000L)
@@ -407,5 +449,8 @@ class ImportParserTest {
 
     private fun JsonObject.string(key: String): String? =
         (this[key] as? JsonPrimitive)?.contentOrNull
+
+    private fun encodeURIComponent(value: String): String =
+        URLEncoder.encode(value, StandardCharsets.UTF_8.name()).replace("+", "%20")
 
 }
