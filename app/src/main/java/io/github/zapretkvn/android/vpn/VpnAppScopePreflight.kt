@@ -4,7 +4,7 @@ import android.content.pm.PackageManager
 import android.net.VpnService
 
 fun interface PackageAvailability {
-    fun isInstalledAndEnabled(packageName: String): Boolean
+    fun isInstalled(packageName: String): Boolean
 }
 
 fun interface AllowedApplicationSink {
@@ -75,7 +75,7 @@ class VpnAppScopePreflight(
         val userPackages = normalizePackageNames(selectedPackages, ownPackageName).toList()
         if (userPackages.isEmpty()) return VpnAppScopeResult.EmptyAllowlist
 
-        val missing = userPackages.filterNot(packageAvailability::isInstalledAndEnabled)
+        val missing = userPackages.filterNot(packageAvailability::isInstalled)
         val availableUserPackages = userPackages - missing.toSet()
         if (availableUserPackages.isEmpty()) {
             return VpnAppScopeResult.MissingApplications(missing)
@@ -108,10 +108,11 @@ class VpnAppScopePreflight(
 class AndroidPackageAvailability(
     private val packageManager: PackageManager,
 ) : PackageAvailability {
-    override fun isInstalledAndEnabled(packageName: String): Boolean =
+    override fun isInstalled(packageName: String): Boolean =
         try {
             @Suppress("DEPRECATION")
-            packageManager.getApplicationInfo(packageName, 0).enabled
+            packageManager.getApplicationInfo(packageName, 0)
+            true
         } catch (_: PackageManager.NameNotFoundException) {
             false
         }

@@ -200,7 +200,13 @@ fun AppPickerScreen(
                     SectionHeader("Популярные")
                 }
                 items(suggestedApps, key = { "suggested-${it.packageName}" }) { app ->
-                    AppRow(app, state.allowedPackages, viewModel)
+                    AppRow(
+                        app = app,
+                        selected = app.packageName in state.allowedPackages,
+                        onSelectedChange = { selected ->
+                            viewModel.setAllowed(app.packageName, selected)
+                        },
+                    )
                 }
             }
 
@@ -209,7 +215,13 @@ fun AppPickerScreen(
                     SectionHeader(if (showSystem) "Все приложения" else "Установленные")
                 }
                 items(regularApps, key = InstalledApp::packageName) { app ->
-                    AppRow(app, state.allowedPackages, viewModel)
+                    AppRow(
+                        app = app,
+                        selected = app.packageName in state.allowedPackages,
+                        onSelectedChange = { selected ->
+                            viewModel.setAllowed(app.packageName, selected)
+                        },
+                    )
                 }
             }
 
@@ -254,21 +266,17 @@ private fun SectionHeader(title: String) {
 }
 
 @Composable
-private fun AppRow(
+internal fun AppRow(
     app: InstalledApp,
-    selectedPackages: Set<String>,
-    viewModel: AppsViewModel,
+    selected: Boolean,
+    onSelectedChange: (Boolean) -> Unit,
 ) {
-    val selected = app.packageName in selectedPackages
-    val canToggle = app.enabled || selected
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .heightIn(min = 64.dp)
             .testTag("app-row-${app.packageName}")
-            .clickable(enabled = canToggle) {
-                viewModel.setAllowed(app.packageName, !selected)
-            }
+            .clickable { onSelectedChange(!selected) }
             .padding(horizontal = 16.dp, vertical = 10.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -283,7 +291,7 @@ private fun AppRow(
             val details = buildList {
                 app.suggestion?.let { add("Рекомендуем: $it") }
                 if (app.system) add("Системное")
-                if (!app.enabled) add("Отключено")
+                if (!app.enabled) add("Отключено в Android")
             }.joinToString(" · ")
             if (details.isNotEmpty()) {
                 Text(
@@ -299,8 +307,7 @@ private fun AppRow(
         }
         Checkbox(
             checked = selected,
-            onCheckedChange = null,
-            enabled = canToggle,
+            onCheckedChange = onSelectedChange,
         )
     }
     HorizontalDivider()

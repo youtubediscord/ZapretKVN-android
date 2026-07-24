@@ -307,7 +307,9 @@ class VpnAppScopePreflightTest {
 
     private fun preflight(available: Set<String>) = VpnAppScopePreflight(
         ownPackageName = OWN_PACKAGE,
-        packageAvailability = PackageAvailability(available::contains),
+        packageAvailability = PackageAvailability { packageName ->
+            packageName in available
+        },
     )
 
     private companion object {

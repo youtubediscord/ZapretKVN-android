@@ -1,5 +1,7 @@
 package io.github.zapretkvn.android.vpn
 
+import androidx.activity.compose.setContent
+import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -9,8 +11,12 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import io.github.zapretkvn.android.MainActivity
 import io.github.zapretkvn.android.ZapretApplication
+import io.github.zapretkvn.android.ui.AppRow
+import io.github.zapretkvn.android.ui.theme.ZapretTheme
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import org.junit.Assert.assertTrue
 import org.junit.After
 import org.junit.Before
 import org.junit.Rule
@@ -61,6 +67,32 @@ class AppPickerUiInstrumentedTest {
         composeRule.activityRule.scenario.recreate()
         composeRule.waitForIdle()
         composeRule.onNodeWithText("В Android TUN: 1").assertExists()
+    }
+
+    @Test
+    fun disabledInstalledAppCanStillBeSelectedForVpn() {
+        val selected = AtomicBoolean(false)
+        composeRule.activity.setContent {
+            ZapretTheme {
+                AppRow(
+                    app = InstalledApp(
+                        packageName = "com.example.disabled.system",
+                        label = "Disabled system app",
+                        system = true,
+                        enabled = false,
+                        suggestion = "Disabled system app",
+                    ),
+                    selected = false,
+                    onSelectedChange = selected::set,
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("app-row-com.example.disabled.system")
+            .assertIsEnabled()
+            .performClick()
+
+        assertTrue(selected.get())
     }
 
     private companion object {
