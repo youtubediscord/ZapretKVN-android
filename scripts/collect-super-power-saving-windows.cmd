@@ -77,17 +77,18 @@ echo commands to the phone.
 echo.
 echo Phase 1/2 - normal battery mode:
 echo 1. Disable the phone's super/ultra power saving mode.
-echo 2. Connect Zapret KVN and confirm traffic in an app selected for VPN.
-echo 3. Return Home and lock the phone.
+echo 2. Connect Zapret KVN and start a network audio/live stream in an app
+echo    selected for VPN. Use content that normally keeps playing when locked.
+echo 3. Return Home without stopping playback and lock the phone.
 echo 4. Without touching the phone, press any key here.
 pause >nul
 call :capture_idle normal
 
 echo.
-echo Unlock the phone. Without opening or reconnecting Zapret KVN, test the
-echo same site or stream in the same selected application.
+echo Unlock the phone. Without opening or reconnecting Zapret KVN, check whether
+echo playback survived and test the same site or stream in the same application.
 set "ZAPRET_NORMAL_RESULT="
-set /p "ZAPRET_NORMAL_RESULT=Type WORKS or FAILS, then press Enter: "
+set /p "ZAPRET_NORMAL_RESULT=Type WORKS or STOPS-after-N-seconds, then press Enter: "
 > "%ZAPRET_EVIDENCE%\normal-user-result.txt" echo %ZAPRET_NORMAL_RESULT%
 
 echo.
@@ -95,16 +96,17 @@ echo Phase 2/2 - super/ultra power saving:
 echo 1. Enable the phone's super/ultra power saving mode manually.
 echo 2. Make sure Zapret KVN is still connected; reconnect it only if the mode
 echo    explicitly disconnected it, and record that fact in the result below.
-echo 3. Confirm traffic in the same selected app, return Home, and lock phone.
+echo 3. Start the same network audio/live stream in the selected app, return
+echo    Home without stopping playback, and lock the phone.
 echo 4. Without touching the phone, press any key here.
 pause >nul
 call :capture_idle super-power-saving
 
 echo.
 echo Unlock the phone. Do not open Zapret KVN and do not reconnect it yet.
-echo Test the same site or stream in the same selected application.
+echo Check whether playback survived and test the same site or stream.
 set "ZAPRET_SUPER_RESULT="
-set /p "ZAPRET_SUPER_RESULT=Type WORKS or FAILS, then press Enter: "
+set /p "ZAPRET_SUPER_RESULT=Type WORKS or STOPS-after-N-seconds, then press Enter: "
 > "%ZAPRET_EVIDENCE%\super-power-saving-user-result.txt" echo %ZAPRET_SUPER_RESULT%
 
 echo.
