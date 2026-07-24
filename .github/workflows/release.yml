@@ -1,47 +1,30 @@
-name: Release
+name: Verify published stable
 
 on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing Git tag for a new release
+        description: Existing locally published stable tag
         required: true
         type: string
-      final_gate_approved:
-        description: Physical Gate 8 and production-key device check are complete
-        required: true
-        default: false
-        type: boolean
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
-  group: release-${{ inputs.tag || github.ref_name }}
+  group: verify-release-${{ inputs.tag || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
-  release:
+  verify:
     runs-on: ubuntu-latest
     timeout-minutes: 180
-    environment: release
     env:
       RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
       ZAPRET_UPDATE_REPOSITORY: ${{ github.repository }}
       ZAPRET_REQUIRE_SIGNED_RELEASE: "1"
-      ZAPRET_EXPECTED_SIGNER_SHA256: ${{ secrets.ANDROID_SIGNING_CERT_SHA256 }}
 
     steps:
-      - name: Configure runner paths
-        shell: bash
-        run: echo "ZAPRET_SIGNING_STORE_FILE=$RUNNER_TEMP/zapret-kvn-release.jks" >> "$GITHUB_ENV"
-
-      - name: Require explicit final-gate attestation
-        shell: bash
-        env:
-          FINAL_GATE_APPROVED: ${{ inputs.final_gate_approved }}
-        run: test "$FINAL_GATE_APPROVED" = true
-
       - name: Checkout exact release tag
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -106,20 +89,27 @@ jobs:
           restore-keys: |
             native-core-toolchain-${{ runner.os }}-${{ runner.arch }}-v1-
 
-      - name: Restore signing key from GitHub Secrets
+      - name: Create ephemeral verification key
         shell: bash
-        env:
-          KEYSTORE_BASE64: ${{ secrets.ANDROID_SIGNING_KEYSTORE_BASE64 }}
         run: |
-          test -n "$KEYSTORE_BASE64"
-          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$ZAPRET_SIGNING_STORE_FILE"
-          chmod 600 "$ZAPRET_SIGNING_STORE_FILE"
+          keytool -genkeypair \
+            -keystore "$RUNNER_TEMP/verification-release.jks" \
+            -storepass verification-only \
+            -keypass verification-only \
+            -alias verification \
+            -keyalg RSA \
+            -keysize 3072 \
+            -validity 2 \
+            -dname "CN=Zapret KVN background verification" \
+            >/dev/null 2>&1
+          chmod 600 "$RUNNER_TEMP/verification-release.jks"
 
       - name: Verify, test and build signed APK
         env:
-          ZAPRET_SIGNING_STORE_PASSWORD: ${{ secrets.ANDROID_SIGNING_STORE_PASSWORD }}
-          ZAPRET_SIGNING_KEY_ALIAS: ${{ secrets.ANDROID_SIGNING_KEY_ALIAS }}
-          ZAPRET_SIGNING_KEY_PASSWORD: ${{ secrets.ANDROID_SIGNING_KEY_PASSWORD }}
+          ZAPRET_SIGNING_STORE_FILE: ${{ runner.temp }}/verification-release.jks
+          ZAPRET_SIGNING_STORE_PASSWORD: verification-only
+          ZAPRET_SIGNING_KEY_ALIAS: verification
+          ZAPRET_SIGNING_KEY_PASSWORD: verification-only
           ZAPRET_CORE_CACHE_HIT: ${{ steps.core-artifacts.outputs.cache-hit }}
         run: scripts/ci-build.sh
 
@@ -139,7 +129,6 @@ jobs:
         shell: bash
         env:
           ZAPRET_REQUIRE_SIGNED_RELEASE: "0"
-          ZAPRET_SIGNING_STORE_FILE: ""
         run: |
           source core.properties
           sudo apt-get update
@@ -197,13 +186,15 @@ jobs:
           scripts/verify-gate8-stress.sh | tee build/gate8-stress/result.txt
           scripts/verify-gate8-performance.sh
 
-      - name: Create verified release bundle
+      - name: Verify locally published release assets
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          scripts/create-release-bundle.sh \
-            "$RELEASE_TAG" \
-            app/build/outputs/apk/matrix/release \
-            release-out
+          test "$(gh release view "$RELEASE_TAG" --json isPrerelease --jq .isPrerelease)" = false
+          mkdir published-release
+          gh release download "$RELEASE_TAG" --dir published-release
+          scripts/verify-release-bundle.sh "$RELEASE_TAG" published-release
 
       - name: Upload release proof
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -211,7 +202,7 @@ jobs:
           name: zapret-kvn-${{ env.RELEASE_TAG }}-proof
           if-no-files-found: error
           path: |
-            release-out/**
+            published-release/**
             app/build/permissions.txt
             app/build/manifest-tree.txt
             app/build/outputs/mapping/release/mapping.txt
@@ -227,33 +218,9 @@ jobs:
             app/build/reports/androidTests/connected/**
             emulator.log
 
-      - name: Publish release assets once
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            echo "Release $RELEASE_TAG already exists; refusing to replace published assets" >&2
-            exit 1
-          fi
-          prerelease=()
-          if [[ "$ZAPRET_PRERELEASE" == true ]]; then prerelease=(--prerelease); fi
-          mapfile -t assets < <(
-            find release-out -maxdepth 1 -type f \
-              \( -name '*.apk' -o -name '*.apk.sha256' -o -name 'release-metadata*.json' \) \
-              | sort
-          )
-          test "${#assets[@]}" -eq 8
-          gh release create "$RELEASE_TAG" \
-            "${assets[@]}" \
-            --verify-tag \
-            --title "Zapret KVN $ZAPRET_VERSION_NAME" \
-            --notes-file release-out/RELEASE_NOTES.md \
-            "${prerelease[@]}"
-
-      - name: Remove signing key
+      - name: Remove ephemeral verification key
         if: always()
         shell: bash
         run: |
-          rm -f "$ZAPRET_SIGNING_STORE_FILE"
+          rm -f "$RUNNER_TEMP/verification-release.jks"
           adb emu kill >/dev/null 2>&1 || true

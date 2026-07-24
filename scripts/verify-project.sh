@@ -14,6 +14,9 @@ MANIFEST="$PROJECT_ROOT/app/src/main/AndroidManifest.xml"
 [[ -f "$PROJECT_ROOT/app/src/main/res/raw/sing_geoip_license.txt" ]]
 [[ -f "$PROJECT_ROOT/audit/rule_set_performance_test.go" ]]
 [[ -f "$PROJECT_ROOT/scripts/core-patchset.sh" ]]
+[[ -x "$PROJECT_ROOT/scripts/publish-local-stable.sh" ]]
+[[ -x "$PROJECT_ROOT/scripts/verify-release-bundle.sh" ]]
+[[ -f "$PROJECT_ROOT/release.properties" ]]
 source "$PROJECT_ROOT/core.properties"
 source "$PROJECT_ROOT/scripts/core-patchset.sh"
 verify_core_patchset "$PROJECT_ROOT"
@@ -21,12 +24,29 @@ verify_core_patchset "$PROJECT_ROOT"
 
 RELEASE_WORKFLOW="$PROJECT_ROOT/.github/workflows/release.yml"
 grep -Fq 'workflow_dispatch:' "$RELEASE_WORKFLOW"
-grep -Fq 'final_gate_approved:' "$RELEASE_WORKFLOW"
-# shellcheck disable=SC2016
-grep -Fq 'ZAPRET_EXPECTED_SIGNER_SHA256: ${{ secrets.ANDROID_SIGNING_CERT_SHA256 }}' "$RELEASE_WORKFLOW"
 grep -Fq 'scripts/verify-gate8-performance.sh' "$RELEASE_WORKFLOW"
+grep -Fq 'scripts/verify-release-bundle.sh' "$RELEASE_WORKFLOW"
+grep -Fq 'permissions:' "$RELEASE_WORKFLOW"
+grep -Fq 'contents: read' "$RELEASE_WORKFLOW"
+if grep -Fq 'gh release create' "$RELEASE_WORKFLOW" ||
+    grep -Fq 'ANDROID_SIGNING_KEYSTORE_BASE64' "$RELEASE_WORKFLOW" ||
+    grep -Fq 'secrets.ANDROID_SIGNING' "$RELEASE_WORKFLOW"; then
+    echo "Background release verification must not publish or access the production key" >&2
+    exit 1
+fi
 if grep -Eq '^[[:space:]]+push:' "$RELEASE_WORKFLOW"; then
-    echo "Release publication must require manual final-gate attestation" >&2
+    echo "Stable verification must be dispatched by the local publisher" >&2
+    exit 1
+fi
+LOCAL_PUBLISHER="$PROJECT_ROOT/scripts/publish-local-stable.sh"
+grep -Fq -- '--final-gate-approved' "$LOCAL_PUBLISHER"
+grep -Fq 'gh release create' "$LOCAL_PUBLISHER"
+grep -Fq 'gh workflow run release.yml' "$LOCAL_PUBLISHER"
+grep -Fq 'scripts/ci-build.sh' "$LOCAL_PUBLISHER"
+grep -Fq 'scripts/verify-release-bundle.sh' "$LOCAL_PUBLISHER"
+source "$PROJECT_ROOT/release.properties"
+if [[ ! "$RELEASE_SIGNER_SHA256" =~ ^[0-9a-f]{64}$ ]]; then
+    echo "Invalid public production signing fingerprint" >&2
     exit 1
 fi
 

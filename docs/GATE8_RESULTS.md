@@ -155,8 +155,10 @@ signer SHA-256
 и exact core `ff11f007ec798136a5de258f947a4f34011a37ea`. Это не заменяет открытый
 real-device прогон `R8-25`.
 
-Release workflow запускается только вручную после явного `final_gate_approved`, требует
-approval защищённой среды `release`, сверяет сертификат APK с закреплённым SHA-256 и
-повторяет 67 instrumented-тестов, process recreation, 100/50 stress и no-background-traffic
-matrix до создания GitHub Release. Rehearsal с временным ключом принял точный fingerprint
-и отклонил несовпадающий; production fingerprint пока не создан.
+Stable publisher запускается локально после явного `--final-gate-approved`, сверяет
+production JKS с закреплённым публичным SHA-256, повторяет host-side build/test/security
+gates и создаёт GitHub Release без ожидания GitHub Actions. После публикации фоновый
+workflow с одноразовым тестовым ключом повторяет 67 instrumented-тестов, process
+recreation, 100/50 stress и no-background-traffic matrix, затем скачивает Release и
+проверяет metadata, checksum, ABI, version и production fingerprint. Production key
+в GitHub Actions больше не передаётся.

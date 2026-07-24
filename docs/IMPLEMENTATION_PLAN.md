@@ -435,16 +435,18 @@ HTTPS-хосты GitHub с ограниченными redirect/размером/
 передаёт content URI штатному installer; silent install не используется. Частичный, битый,
 отменённый или оставшийся после process restart APK удаляется из `cache/updates`.
 
-Release workflow принимает строгие tags `vMAJOR.MINOR.PATCH` и `-beta.N`, выводит
-детерминированный монотонный versionCode, собирает exact pinned core, тестирует, подписывает
-отдельные arm64-v8a/armeabi-v7a/x86_64 APK секретами environment `release`, проверяет
-`apksigner`/manifest/единственность ABI и публикует APK, SHA-256, metadata и notes один раз без замены уже опубликованных assets. Локальная сборка
-этого bundle пройдена с постоянным production-ключом; опубликованы prerelease
-`v0.2.1-beta.30` и stable `v0.2.1` с тремя ABI, checksum и metadata.
+Локальный stable publisher принимает строгий tag `vMAJOR.MINOR.PATCH`, выводит
+детерминированный монотонный versionCode, собирает exact pinned core, тестирует,
+подписывает отдельные arm64-v8a/armeabi-v7a/x86_64 APK постоянным owner-only ключом,
+проверяет `apksigner`/manifest/единственность ABI и публикует APK, SHA-256, metadata и
+notes один раз без замены уже опубликованных assets. После публикации он запускает
+GitHub Actions как независимую фоновую проверку и не ждёт её. Workflow не имеет
+production key и ничего не публикует.
 
-Постоянный ключ создан, проверен и добавлен владельцем в GitHub Secrets; workflow и
-[инструкция](SIGNING.md) готовы. `I7-07` остаётся открытым только до подтверждения двух
-отдельных зашифрованных офлайн-копий ключа.
+Постоянный ключ создан, проверен и хранится локально вне репозитория; публичный
+fingerprint закреплён в `release.properties`. Локальный publisher, фоновый verification
+workflow и [инструкция](SIGNING.md) готовы. `I7-07` остаётся открытым только до
+подтверждения двух отдельных зашифрованных офлайн-копий ключа.
 
 ### Gate 7
 

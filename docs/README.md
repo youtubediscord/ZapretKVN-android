@@ -422,6 +422,18 @@ scripts/ci-build.sh
 
 Скрипт собирает закреплённые CLI/AAR, проверяет fixtures и rule-set, запускает Go/Kotlin tests и lint, собирает `x86_64` debug APK и три release APK, затем проверяет ABI, stripping, R8 mapping, native symbols и security-инварианты.
 
+Официальный stable после выполнения физических release-gates собирается и публикуется
+локально production-ключом:
+
+```bash
+git tag -a vMAJOR.MINOR.PATCH -m "Zapret KVN MAJOR.MINOR.PATCH"
+scripts/publish-local-stable.sh vMAJOR.MINOR.PATCH --final-gate-approved
+```
+
+Publisher не ждёт GitHub Actions: после создания Release он только запускает независимую
+фоновую проверку. Production key в Actions не передаётся. Полный контракт ключей,
+tag и защиты от повторной публикации описан в [инструкции по подписи](SIGNING.md).
+
 Для debug APK другой архитектуры используйте, например:
 
 ```bash
