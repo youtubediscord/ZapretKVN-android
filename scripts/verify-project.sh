@@ -235,6 +235,7 @@ docs = [docs_root / name for name in (
     "IMPORT_FORMATS.md",
     "IMPLEMENTATION_PLAN.md",
     "README.md",
+    "LICENSING.md",
     "SIGNING.md",
     "GATE8_RESULTS.md",
     "THIRD_PARTY_NOTICES.md",

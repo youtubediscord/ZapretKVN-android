@@ -1240,7 +1240,7 @@ private fun AboutSettings(
             }
         }
         Text(
-            "Лицензия приложения: GPL-3.0. Лицензии ядра и библиотек включены в APK и NOTICE.",
+            "Лицензия приложения: GPL-3.0-or-later. Распространение закрытых производных APK запрещено; полный соответствующий исходный код обязателен. Название и фирменное оформление Zapret KVN не лицензируются GPL. Лицензии ядра и библиотек включены в APK и NOTICE.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
