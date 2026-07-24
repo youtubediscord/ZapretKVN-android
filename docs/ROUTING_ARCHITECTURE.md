@@ -238,11 +238,11 @@ IP/CIDR block добавляется только в `route.rules`. Route reject
 
 ## Проверка
 
-Эталон [RU rule-set routing](testdata/routing/ru-rule-set.json), SHA-256 `cad0494627f4776eda70da316bd9caea6105007cc39717923ab6a7062aa6fc96`, является schema/graph fixture: reserved example-сети имитируют IP-набор, а `selected-proxy` заменён на `direct`. Повторный аудит подтвердил `sing-box check` на точном core commit; fixture не содержит package-правил и legacy GEO-полей.
+Эталон [RU rule-set routing](../testdata/routing/ru-rule-set.json), SHA-256 `cad0494627f4776eda70da316bd9caea6105007cc39717923ab6a7062aa6fc96`, является schema/graph fixture: reserved example-сети имитируют IP-набор, а `selected-proxy` заменён на `direct`. Повторный аудит подтвердил `sing-box check` на точном core commit; fixture не содержит package-правил и legacy GEO-полей.
 
-Эталон [Block rule](testdata/routing/block-rule.json), SHA-256 `d19bb2ede90a327c699544d76757f6a2fbee9ceb55570c8330ac2acfe12a1f3b`, проверяет связку DNS `reject` + route `reject`, отсутствие legacy block outbound и отсутствие глобального sniff. Exact core и compatibility CLI приняли fixture повторно.
+Эталон [Block rule](../testdata/routing/block-rule.json), SHA-256 `d19bb2ede90a327c699544d76757f6a2fbee9ceb55570c8330ac2acfe12a1f3b`, проверяет связку DNS `reject` + route `reject`, отсутствие legacy block outbound и отсутствие глобального sniff. Exact core и compatibility CLI приняли fixture повторно.
 
-Реализация от 22 июля 2026 года включает два packaged binary-набора: `zapret-ru-domains.srs` (53 байта, SHA-256 `a39faeb4a4c894a2ce665b8919322cee626f61dd12c63a63736fcf8b0a433053`) и `zapret-ru-ip.srs` (50 036 байт, SHA-256 `1f4cccc9bb9510bb29d8a4b7d326b869bff94e9911d555acc0570545dabfaa7b`). [Manifest](app/src/main/assets/rule-sets/manifest.json) закрепляет exact core/source revision/license; [проверочный скрипт](scripts/verify-rule-sets.sh) воспроизводит domain-набор и проверяет RU/non-RU domain/IPv4/IPv6 exact CLI.
+Реализация от 22 июля 2026 года включает два packaged binary-набора: `zapret-ru-domains.srs` (53 байта, SHA-256 `a39faeb4a4c894a2ce665b8919322cee626f61dd12c63a63736fcf8b0a433053`) и `zapret-ru-ip.srs` (50 036 байт, SHA-256 `1f4cccc9bb9510bb29d8a4b7d326b869bff94e9911d555acc0570545dabfaa7b`). [Manifest](../app/src/main/assets/rule-sets/manifest.json) закрепляет exact core/source revision/license; [проверочный скрипт](../scripts/verify-rule-sets.sh) воспроизводит domain-набор и проверяет RU/non-RU domain/IPv4/IPv6 exact CLI.
 
 Автоматизированная проверка: 47/47 JVM tests и 46/46 instrumented tests на API 26 и 36. Все шесть presets проходят реальный Android TUN → local SOCKS5/direct/reject путь для RU/non-RU domain и IPv4/IPv6; UI summary, сохранённый JSON и фактический outbound совпадают. Отдельно доказаны selected/unselected UID, стандартный DNS reject, embedded HTTPS DoH→numeric limitation, offline install/repair и native `CheckConfig()`.
 

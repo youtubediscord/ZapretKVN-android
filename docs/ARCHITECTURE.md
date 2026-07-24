@@ -614,7 +614,7 @@ Gate: APK не выпускается при failed fixture, instrumented test, 
 
 - 7/7 JSON приняты CLI, собранным из точного commit;
 - 7/7 приняты compatibility release CLI;
-- [Android WireGuard ClientBind fixture](testdata/routing/wireguard-android-client-bind.json),
+- [Android WireGuard ClientBind fixture](../testdata/routing/wireguard-android-client-bind.json),
   SHA-256 `822dcc9c6a138418b8adc51be44260ac3ff0dceb10187506e1506a5c710974c7`,
   фиксирует Android WireGuard endpoint, health-route и раздельные TUN/endpoint MTU;
 - `go test ./dns/... ./route/rule ./experimental/libbox` проходит; наш воспроизводимый audit test дополнительно проверяет exact pinned fallback success/error/hang/RCODE внутри исходного Go package;

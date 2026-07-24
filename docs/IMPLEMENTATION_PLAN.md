@@ -56,7 +56,7 @@ portal и физической энергии не блокирует стату
 
 ### Репозиторий и Android
 
-- [x] `I0-01` Инициализировать Git-репозиторий и добавить `.gitignore`, `LICENSE`, `README.md`.
+- [x] `I0-01` Инициализировать Git-репозиторий и добавить `.gitignore`, `docs/LICENSE`, `docs/README.md`.
 - [x] `I0-02` Создать Gradle wrapper и один модуль `app`; Kotlin, Compose и Material 3, minSdk 26.
 - [x] `I0-03` Зафиксировать версии AGP/Kotlin/JDK; не добавлять convention plugins и version catalog без реальной необходимости.
 - [x] `I0-04` Создать `ZapretApplication`, ручной `AppContainer`, `MainActivity` и четыре нижние вкладки-заглушки.
@@ -73,7 +73,7 @@ portal и физической энергии не блокирует стату
 - [x] `I0-11` В CI запускать `sing-box check` для всех файлов `testdata/**/*.json`.
 - [x] `I0-12` В CI запускать pinned Go tests и Android unit tests.
 - [x] `I0-13` Собирать debug APK в GitHub Actions и сохранять core version/revision рядом с artifact.
-- [x] `I0-14` Добавить license/NOTICE для приложения, sing-box-extended и включённых библиотек.
+- [x] `I0-14` Добавить `docs/LICENSE`/`docs/NOTICE` для приложения, sing-box-extended и включённых библиотек.
 
 ### Gate 0
 

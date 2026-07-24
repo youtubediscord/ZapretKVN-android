@@ -7,8 +7,8 @@ MANIFEST="$PROJECT_ROOT/app/src/main/AndroidManifest.xml"
 [[ -f "$PROJECT_ROOT/settings.gradle.kts" ]]
 [[ -f "$PROJECT_ROOT/app/build.gradle.kts" ]]
 [[ -f "$MANIFEST" ]]
-[[ -f "$PROJECT_ROOT/NOTICE" ]]
-[[ -f "$PROJECT_ROOT/THIRD_PARTY_NOTICES.md" ]]
+[[ -f "$PROJECT_ROOT/docs/NOTICE" ]]
+[[ -f "$PROJECT_ROOT/docs/THIRD_PARTY_NOTICES.md" ]]
 [[ -f "$PROJECT_ROOT/gradle/verification-metadata.xml" ]]
 [[ -f "$PROJECT_ROOT/app/src/main/res/raw/sing_box_extended_license.txt" ]]
 [[ -f "$PROJECT_ROOT/app/src/main/res/raw/sing_geoip_license.txt" ]]
@@ -30,9 +30,9 @@ if grep -Eq '^[[:space:]]+push:' "$RELEASE_WORKFLOW"; then
     exit 1
 fi
 
-cmp -s "$PROJECT_ROOT/LICENSE" "$PROJECT_ROOT/app/src/main/res/raw/license_gpl_3.txt"
-cmp -s "$PROJECT_ROOT/NOTICE" "$PROJECT_ROOT/app/src/main/res/raw/notice.txt"
-cmp -s "$PROJECT_ROOT/THIRD_PARTY_NOTICES.md" "$PROJECT_ROOT/app/src/main/res/raw/third_party_notices.txt"
+cmp -s "$PROJECT_ROOT/docs/LICENSE" "$PROJECT_ROOT/app/src/main/res/raw/license_gpl_3.txt"
+cmp -s "$PROJECT_ROOT/docs/NOTICE" "$PROJECT_ROOT/app/src/main/res/raw/notice.txt"
+cmp -s "$PROJECT_ROOT/docs/THIRD_PARTY_NOTICES.md" "$PROJECT_ROOT/app/src/main/res/raw/third_party_notices.txt"
 
 WRAPPER_PROPERTIES="$PROJECT_ROOT/gradle/wrapper/gradle-wrapper.properties"
 grep -Fqx 'distributionUrl=https\://services.gradle.org/distributions/gradle-9.4.1-bin.zip' "$WRAPPER_PROPERTIES"
@@ -227,7 +227,8 @@ import re
 import sys
 
 root = Path(sys.argv[1])
-docs = [root / name for name in (
+docs_root = root / "docs"
+docs = [docs_root / name for name in (
     "ARCHITECTURE.md",
     "DNS_ARCHITECTURE.md",
     "ROUTING_ARCHITECTURE.md",
@@ -274,7 +275,7 @@ import sys
 
 root = Path(sys.argv[1])
 surfaces = {
-    "README": (root / "README.md").read_text(),
+    "README": (root / "docs/README.md").read_text(),
     "UI": (root / "app/src/main/java/io/github/zapretkvn/android/ui/SettingsScreen.kt").read_text(),
     "release notes generator": (root / "scripts/create-release-bundle.sh").read_text(),
 }

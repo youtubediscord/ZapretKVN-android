@@ -366,7 +366,7 @@ debug key, поэтому они устанавливаются рядом и н
 При ошибке главная сразу показывает стабильный код вида `DNS-101` или `NET-102` и понятное описание. В «Настройки → Диагностика» видны этот же код, безопасная техническая причина, длительности этапов, bounded-логи и последний Kotlin/Java crash. Кнопка «Экспортировать диагностику» вверху экрана формирует redacted-отчёт без профиля и credentials.
 
 Для объективного физического замера stable APK используйте
-[`collect-stable-gate-windows.cmd`](scripts/collect-stable-gate-windows.cmd). Скрипт
+[`collect-stable-gate-windows.cmd`](../scripts/collect-stable-gate-windows.cmd). Скрипт
 не меняет VPN, DNS, профили или сети: он последовательно собирает idle без VPN, idle
 с VPN, воспроизведение видео и Wi-Fi ↔ mobile, сохраняя CPU, PSS, scheduler trace,
 счётчики интерфейсов, batterystats, connectivity и logcat в один ZIP на рабочем столе.
