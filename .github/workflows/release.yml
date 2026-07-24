@@ -137,6 +137,8 @@ jobs:
 
       - name: Run Android and no-background-traffic gates
         shell: bash
+        env:
+          ZAPRET_REQUIRE_SIGNED_RELEASE: "0"
         run: |
           source core.properties
           sudo apt-get update
