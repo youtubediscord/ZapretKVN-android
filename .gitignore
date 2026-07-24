@@ -12,6 +12,7 @@ captures/
 *.keystore
 keystore.properties
 signing.properties
+AGENTS.md
 
 # Generated core artifacts
 app/libs/*.aar
