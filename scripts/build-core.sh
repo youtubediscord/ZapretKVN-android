@@ -158,12 +158,12 @@ chmod 0755 "$OUTPUT_DIR/sing-box"
 "$PROJECT_ROOT/scripts/verify-core-version.sh" "$OUTPUT_DIR/sing-box"
 "$PROJECT_ROOT/scripts/verify-fixtures.sh" "$OUTPUT_DIR/sing-box"
 install -m 0644 \
-    "$PROJECT_ROOT/audit/core/fallback_strategy_test.go" \
+    "$PROJECT_ROOT/audit/fallback_strategy_test.go" \
     "$SOURCE_DIR/dns/transport/fallback/zapret_audit_test.go"
 go test ./dns/transport/fallback -run '^TestZapret' -count=1
 rm -f "$SOURCE_DIR/dns/transport/fallback/zapret_audit_test.go"
 install -m 0644 \
-    "$PROJECT_ROOT/audit/core/rule_set_performance_test.go" \
+    "$PROJECT_ROOT/audit/rule_set_performance_test.go" \
     "$SOURCE_DIR/route/rule/zapret_performance_test.go"
 ZAPRET_RU_DOMAIN_SRS="$PROJECT_ROOT/app/src/main/assets/rule-sets/zapret-ru-domains.srs" \
 ZAPRET_RU_IP_SRS="$PROJECT_ROOT/app/src/main/assets/rule-sets/zapret-ru-ip.srs" \

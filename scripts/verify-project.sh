@@ -12,7 +12,7 @@ MANIFEST="$PROJECT_ROOT/app/src/main/AndroidManifest.xml"
 [[ -f "$PROJECT_ROOT/gradle/verification-metadata.xml" ]]
 [[ -f "$PROJECT_ROOT/app/src/main/res/raw/sing_box_extended_license.txt" ]]
 [[ -f "$PROJECT_ROOT/app/src/main/res/raw/sing_geoip_license.txt" ]]
-[[ -f "$PROJECT_ROOT/audit/core/rule_set_performance_test.go" ]]
+[[ -f "$PROJECT_ROOT/audit/rule_set_performance_test.go" ]]
 [[ -f "$PROJECT_ROOT/scripts/core-patchset.sh" ]]
 source "$PROJECT_ROOT/core.properties"
 source "$PROJECT_ROOT/scripts/core-patchset.sh"

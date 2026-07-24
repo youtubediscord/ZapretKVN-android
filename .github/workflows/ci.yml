@@ -65,7 +65,7 @@ jobs:
             app/libs/libbox.aar
             app/libs/libbox.properties
             core-build/output
-          key: native-core-artifacts-${{ runner.os }}-${{ runner.arch }}-v1-${{ hashFiles('core.properties', 'core-patches/**', 'scripts/core-patchset.sh', 'scripts/build-core.sh', 'scripts/build-native-symbols.sh', 'scripts/verify-core-cache.sh', 'scripts/verify-core-version.sh', 'scripts/verify-fixtures.sh', 'audit/core/**', 'testdata/**', 'app/src/main/assets/rule-sets/**', 'app/src/main/res/raw/sing_box_extended_license.txt') }}
+          key: native-core-artifacts-${{ runner.os }}-${{ runner.arch }}-v1-${{ hashFiles('core.properties', 'core-patches/**', 'scripts/core-patchset.sh', 'scripts/build-core.sh', 'scripts/build-native-symbols.sh', 'scripts/verify-core-cache.sh', 'scripts/verify-core-version.sh', 'scripts/verify-fixtures.sh', 'audit/*.go', 'testdata/**', 'app/src/main/assets/rule-sets/**', 'app/src/main/res/raw/sing_box_extended_license.txt') }}
 
       - name: Set up native core toolchain cache
         if: steps.core-artifacts.outputs.cache-hit != 'true'
