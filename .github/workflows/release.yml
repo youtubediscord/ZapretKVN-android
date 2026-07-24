@@ -150,12 +150,14 @@ jobs:
             --name release_gate_api36 \
             --package "system-images;android-$ANDROID_COMPILE_SDK;google_apis;x86_64"
           sudo chown "$(id -un)" /dev/kvm || true
+          EMULATOR="$ANDROID_SDK_ROOT/emulator/emulator"
+          test -x "$EMULATOR"
           : > emulator.log
           start_emulator() {
             local attempt emulator_pid deadline
             for attempt in 1 2; do
               echo "Starting Android emulator (attempt $attempt/2)" | tee -a emulator.log
-              emulator -avd release_gate_api36 -no-window -no-audio -no-boot-anim \
+              "$EMULATOR" -avd release_gate_api36 -no-window -no-audio -no-boot-anim \
                 -gpu swiftshader_indirect -no-snapshot -wipe-data >> emulator.log 2>&1 &
               emulator_pid=$!
               deadline=$((SECONDS + 90))
