@@ -53,7 +53,12 @@ for abi in "${RELEASE_ABIS[@]}"; do
     )
 done
 mapfile -t EXPECTED_FILES < <(printf '%s\n' "${EXPECTED_FILES[@]}" | sort)
-mapfile -t ACTUAL_FILES < <(find "$BUNDLE_DIR" -mindepth 1 -maxdepth 1 -type f -printf '%f\n' | sort)
+mapfile -t ACTUAL_FILES < <(
+    find "$BUNDLE_DIR" -mindepth 1 -maxdepth 1 -type f \
+        ! -name 'RELEASE_NOTES.md' \
+        -printf '%f\n' \
+        | sort
+)
 if [[ "${ACTUAL_FILES[*]}" != "${EXPECTED_FILES[*]}" ]]; then
     echo "Published release asset set differs from the required eight files" >&2
     printf 'Expected: %s\nActual: %s\n' "${EXPECTED_FILES[*]}" "${ACTUAL_FILES[*]}" >&2
