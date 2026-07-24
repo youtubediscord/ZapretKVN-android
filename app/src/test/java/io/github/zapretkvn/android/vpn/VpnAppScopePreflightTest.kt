@@ -160,6 +160,86 @@ class VpnAppScopePreflightTest {
     }
 
     @Test
+    fun `disabled recommended system apps are selected by default but ordinary system apps are not`() {
+        val packages = defaultVpnPackages(
+            listOf(
+                installedApp(
+                    packageName = "com.google.android.apps.bard",
+                    system = true,
+                    enabled = false,
+                    suggestion = "Gemini",
+                ),
+                installedApp(
+                    packageName = "com.google.android.youtube",
+                    system = true,
+                    enabled = false,
+                    suggestion = "YouTube",
+                ),
+                installedApp(
+                    packageName = "com.google.android.apps.youtube.music",
+                    system = true,
+                    enabled = false,
+                    suggestion = "YouTube Music",
+                ),
+                installedApp(
+                    packageName = "com.android.settings",
+                    system = true,
+                    enabled = true,
+                    suggestion = null,
+                ),
+            ),
+        )
+
+        assertEquals(
+            setOf(
+                "com.google.android.apps.bard",
+                "com.google.android.youtube",
+                "com.google.android.apps.youtube.music",
+            ),
+            packages,
+        )
+    }
+
+    @Test
+    fun `revision two migrates Gemini YouTube and YouTube Music into existing include scope once`() {
+        val migratedPackages = setOf(
+            "com.google.android.apps.bard",
+            "com.google.android.youtube",
+            "com.google.android.apps.youtube.music",
+        )
+
+        assertEquals(2, PopularAppSuggestions.MIGRATION_REVISION)
+        assertEquals(
+            migratedPackages,
+            PopularAppSuggestions.packagesAddedInCurrentRevision,
+        )
+        assertEquals(
+            sortedSetOf("org.telegram.messenger") + migratedPackages,
+            mergeSuggestedPackages(
+                currentPackages = setOf("org.telegram.messenger"),
+                suggestedPackages = emptySet(),
+                newlySuggestedPackages = migratedPackages,
+                initialized = true,
+                mode = AppScopeMode.Include,
+                storedSuggestionRevision = 1,
+                suggestionRevision = 2,
+            ),
+        )
+        assertEquals(
+            sortedSetOf("org.telegram.messenger"),
+            mergeSuggestedPackages(
+                currentPackages = setOf("org.telegram.messenger"),
+                suggestedPackages = emptySet(),
+                newlySuggestedPackages = migratedPackages,
+                initialized = true,
+                mode = AppScopeMode.Include,
+                storedSuggestionRevision = 2,
+                suggestionRevision = 2,
+            ),
+        )
+    }
+
+    @Test
     fun `new suggestions are added once to an initialized include list`() {
         assertEquals(
             sortedSetOf("com.example.current", "com.openai.chatgpt", "notion.id"),
@@ -310,6 +390,19 @@ class VpnAppScopePreflightTest {
         packageAvailability = PackageAvailability { packageName ->
             packageName in available
         },
+    )
+
+    private fun installedApp(
+        packageName: String,
+        system: Boolean,
+        enabled: Boolean,
+        suggestion: String?,
+    ) = InstalledApp(
+        packageName = packageName,
+        label = packageName,
+        system = system,
+        enabled = enabled,
+        suggestion = suggestion,
     )
 
     private companion object {

@@ -277,18 +277,11 @@ object PopularAppSuggestions {
     )
 
     val packageNames: Set<String> = labelsByPackage.keys
-    const val MIGRATION_REVISION: Int = 1
+    const val MIGRATION_REVISION: Int = 2
     val packagesAddedInCurrentRevision: Set<String> = setOf(
-        "com.openai.chatgpt",
-        "com.anthropic.claude",
         "com.google.android.apps.bard",
-        "ai.perplexity.app.android",
-        "com.microsoft.copilot",
-        "com.deepseek.chat",
-        "ai.x.grok",
-        "com.suno.android",
-        "com.spotify.music",
-        "notion.id",
+        "com.google.android.youtube",
+        "com.google.android.apps.youtube.music",
     )
 
     fun labelFor(packageName: String): String? = labelsByPackage[packageName]

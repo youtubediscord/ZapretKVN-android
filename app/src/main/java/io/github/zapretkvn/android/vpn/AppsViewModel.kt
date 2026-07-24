@@ -86,17 +86,12 @@ class AppsViewModel(
                         else -> null
                     },
                 )
-                val enabledSuggestedApps = snapshot.apps
-                    .asSequence()
-                    .filter(InstalledApp::enabled)
-                    .filter { it.suggestion != null }
-                    .map(InstalledApp::packageName)
-                    .toSet()
-                val newlySuggestedPackages = enabledSuggestedApps.intersect(
+                val installedSuggestedApps = defaultVpnPackages(snapshot.apps)
+                val newlySuggestedPackages = installedSuggestedApps.intersect(
                     PopularAppSuggestions.packagesAddedInCurrentRevision,
                 )
                 selectionStore.initializeIfNeeded(
-                    suggestedPackages = enabledSuggestedApps,
+                    suggestedPackages = installedSuggestedApps,
                     newlySuggestedPackages = newlySuggestedPackages,
                     suggestionRevision = PopularAppSuggestions.MIGRATION_REVISION,
                 )
@@ -138,3 +133,9 @@ class AppsViewModel(
             AppsViewModel(selectionStore, appCatalog) as T
     }
 }
+
+internal fun defaultVpnPackages(installedApps: List<InstalledApp>): Set<String> = installedApps
+    .asSequence()
+    .filter { it.suggestion != null }
+    .map(InstalledApp::packageName)
+    .toSet()
