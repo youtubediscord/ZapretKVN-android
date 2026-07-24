@@ -4,7 +4,7 @@
 
 | Поле | Значение |
 |---|---|
-| Статус | Stable `v0.2.3`, этапы 0–7 и automated Gate 8 готовы; физическая матрица и две офлайн-копии ключа остаются открыты |
+| Статус | Stable `v0.2.4`, этапы 0–7 и automated Gate 8 готовы; физическая матрица и две офлайн-копии ключа остаются открыты |
 | Текущий этап | Этап 8: обязательная выпускная матрица |
 | Минимальная ОС | Android 8.0, API 26 |
 | Устройства MVP | Телефоны |
@@ -528,7 +528,7 @@ production default по AVD-данным не изменён.
 - [x] Все известные ограничения синхронно перечислены в UI, README и генерируемых
   release notes; это проверяет `scripts/verify-project.sh`.
 - [ ] После прохождения gate опубликован первый production GitHub Release. Stable
-  `v0.2.1`, `v0.2.2` и исправляющий WireGuard MTU `v0.2.3` опубликованы 23–24 июля 2026 года по явному
+  `v0.2.1`–`v0.2.4` опубликованы 23–24 июля 2026 года по явному
   решению владельца до завершения физической матрицы; публикация не закрывает сам
   gate задним числом.
 
@@ -606,9 +606,13 @@ production-signed arm64 APK на реальном устройстве и нез
   внешний Android TUN `min(1500, endpoint MTU)` во всех DNS-режимах; exact fixture,
   JVM, lint и release-candidate проверки проходят. Физическое подтверждение остаётся
   открытым пунктом `I6-10C`.
+- [x] Stable `v0.2.4` опубликован из commit `ec6aad4` с versionCode `200499`,
+  production-подписью и отдельными arm64-v8a, armeabi-v7a и x86_64 APK.
+  GitHub Release содержит SHA-256 и schema 1/2 metadata; tag указывает на exact
+  локально проверенный source commit.
 - [ ] Idle CPU/battery release-gate выполнен на физических устройствах.
 
-**Следующее действие:** установить [beta 0.2.4-beta.1](https://github.com/youtubediscord/ZapretKVN-android/releases/tag/v0.2.4-beta.1) поверх stable 0.2.3 и на том же WireGuard-профиле проверить все четыре DNS-режима, эффективный `vpn_hiding.tun_mtu=1280`, фактический Android TUN MTU, HTTPS health по IPv4 и длительность остановки. Если видео всё ещё тормозит, выполнить чистый throughput A/B ↔ официальная Amnezia без смены сервера. Затем повторить
+**Следующее действие:** установить [stable 0.2.4](https://github.com/youtubediscord/ZapretKVN-android/releases/tag/v0.2.4) поверх stable 0.2.3 и на том же WireGuard-профиле проверить все четыре DNS-режима, эффективный `vpn_hiding.tun_mtu=1280`, фактический Android TUN MTU, HTTPS health по IPv4 и длительность остановки. Если видео всё ещё тормозит, выполнить чистый throughput A/B ↔ официальная Amnezia без смены сервера. Затем повторить
 «Из JSON», DNS Android, Auto, Secure, смену Wi‑Fi/mobile и длительную сессию; после этого остаются физическая
 матрица этапа 8 (captive portal, IPv6-only/NAT64, камера/HTTPS subscription,
 blocked-DNS/LKG/DoH, OEM per-app/routing и энергия) и production signing key по `SIGNING.md`.
