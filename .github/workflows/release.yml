@@ -139,6 +139,7 @@ jobs:
         shell: bash
         env:
           ZAPRET_REQUIRE_SIGNED_RELEASE: "0"
+          ZAPRET_SIGNING_STORE_FILE: ""
         run: |
           source core.properties
           sudo apt-get update
