@@ -87,6 +87,19 @@ class AppDiscoveryCoordinatorTest {
             AppDiscoverySourceOutcome.PermissionDenied,
             report.source(AppDiscoverySourceId.InstalledApplications).outcome,
         )
+        assertEquals(
+            "java.lang.SecurityException: denied",
+            report.source(AppDiscoverySourceId.InstalledApplications).rawFailure,
+        )
+        assertEquals(
+            """
+            InstalledApplications: java.lang.SecurityException: denied
+            InstalledPackages: Success, count=2
+            Launcher: Success, count=1
+            LeanbackLauncher: Success, count=0
+            """.trimIndent(),
+            report.summary.rawProblemText(),
+        )
     }
 
     @Test
@@ -105,6 +118,10 @@ class AppDiscoveryCoordinatorTest {
             report.summary.sources.all {
                 it.outcome == AppDiscoverySourceOutcome.PlatformUnavailable
             },
+        )
+        assertTrue(
+            requireNotNull(report.summary.rawProblemText())
+                .contains("java.lang.IllegalStateException: user locked"),
         )
     }
 
@@ -125,6 +142,51 @@ class AppDiscoveryCoordinatorTest {
         assertEquals(
             AppDiscoverySourceOutcome.UnexpectedFailure,
             report.source(AppDiscoverySourceId.Launcher).outcome,
+        )
+    }
+
+    @Test
+    fun partialCatalogWithoutExceptionShowsRawSourceCounts() {
+        val report = coordinator(
+            primary = source(OWN),
+            fallback = source(OWN),
+            launcher = source("org.telegram.messenger"),
+        ).discover()
+
+        assertEquals(
+            """
+            InstalledApplications: Success, count=1
+            InstalledPackages: Success, count=1
+            Launcher: Success, count=1
+            LeanbackLauncher: Success, count=0
+            """.trimIndent(),
+            report.summary.rawProblemText(),
+        )
+    }
+
+    @Test
+    fun catalogSnapshotAppendsRawNonInventoryFailures() {
+        val discovery = AppDiscoverySummary(
+            completeness = AppDiscoveryCompleteness.Complete,
+            sources = listOf(
+                AppDiscoverySourceReport(
+                    source = AppDiscoverySourceId.InstalledApplications,
+                    outcome = AppDiscoverySourceOutcome.Success,
+                    itemCount = 20,
+                ),
+            ),
+        )
+        val snapshot = AppCatalogSnapshot(
+            apps = emptyList(),
+            discovery = discovery,
+            rawFailures = listOf(
+                "TelegramHandlers[0]: java.lang.SecurityException: denied",
+            ),
+        )
+
+        assertEquals(
+            "TelegramHandlers[0]: java.lang.SecurityException: denied",
+            snapshot.rawProblemText(),
         )
     }
 

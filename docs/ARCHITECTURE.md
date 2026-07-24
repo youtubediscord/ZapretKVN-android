@@ -472,7 +472,9 @@ wireguard-import/    независимый parser WireGuard/AWG без зави
   `getInstalledApplications()` сверяется с явными `MAIN`/`LAUNCHER` queries, а
   `getInstalledPackages()` вызывается только при ошибке, почти пустом результате
   или доказанном launcher-расхождении. Типизированный discovery-report различает
-  полный, восстановленный, частичный и неудачный каталог без сохранения package list;
+  полный, восстановленный, частичный и неудачный каталог без сохранения package list.
+  Ошибка источника не заменяется придуманным сообщением: picker показывает имя
+  операции, исходный `Throwable.toString()` и фактические counts остальных источников;
 - `REQUEST_INSTALL_PACKAGES` только для явно запущенного GitHub updater и штатного installer;
 - системный file picker без broad storage permission;
 - буфер только после явного нажатия.

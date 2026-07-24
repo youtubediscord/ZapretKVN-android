@@ -5,6 +5,7 @@ internal data class DiscoveredApplication(
     val label: String,
     val system: Boolean,
     val enabled: Boolean,
+    val rawFailures: List<String> = emptyList(),
 )
 
 internal enum class AppDiscoverySourceId {
@@ -26,6 +27,7 @@ internal data class AppDiscoverySourceReport(
     val source: AppDiscoverySourceId,
     val outcome: AppDiscoverySourceOutcome,
     val itemCount: Int,
+    val rawFailure: String? = null,
 )
 
 internal enum class AppDiscoveryCompleteness {
@@ -38,7 +40,18 @@ internal enum class AppDiscoveryCompleteness {
 internal data class AppDiscoverySummary(
     val completeness: AppDiscoveryCompleteness,
     val sources: List<AppDiscoverySourceReport>,
-)
+) {
+    fun rawProblemText(): String? {
+        val hasFailure = sources.any { it.rawFailure != null }
+        if (!hasFailure &&
+            completeness != AppDiscoveryCompleteness.Partial &&
+            completeness != AppDiscoveryCompleteness.Failed
+        ) {
+            return null
+        }
+        return sources.joinToString(separator = "\n", transform = AppDiscoverySourceReport::rawText)
+    }
+}
 
 internal data class AppDiscoveryReport(
     val applications: List<DiscoveredApplication>,
@@ -144,21 +157,27 @@ internal class AppDiscoveryCoordinator(
                     itemCount = applications.size,
                 ),
             )
-        } catch (_: SecurityException) {
-            failed(source.id, AppDiscoverySourceOutcome.PermissionDenied)
-        } catch (_: IllegalStateException) {
-            failed(source.id, AppDiscoverySourceOutcome.PlatformUnavailable)
-        } catch (_: Exception) {
-            failed(source.id, AppDiscoverySourceOutcome.UnexpectedFailure)
+        } catch (failure: SecurityException) {
+            failed(source.id, AppDiscoverySourceOutcome.PermissionDenied, failure)
+        } catch (failure: IllegalStateException) {
+            failed(source.id, AppDiscoverySourceOutcome.PlatformUnavailable, failure)
+        } catch (failure: Exception) {
+            failed(source.id, AppDiscoverySourceOutcome.UnexpectedFailure, failure)
         }
     }
 
     private fun failed(
         source: AppDiscoverySourceId,
         outcome: AppDiscoverySourceOutcome,
+        failure: Exception,
     ): SourceResult = SourceResult(
         applications = emptyList(),
-        report = AppDiscoverySourceReport(source = source, outcome = outcome, itemCount = 0),
+        report = AppDiscoverySourceReport(
+            source = source,
+            outcome = outcome,
+            itemCount = 0,
+            rawFailure = failure.toString(),
+        ),
     )
 
     private data class SourceResult(
@@ -169,3 +188,9 @@ internal class AppDiscoveryCoordinator(
 
 private fun List<DiscoveredApplication>.packageNames(): Set<String> =
     mapTo(linkedSetOf(), DiscoveredApplication::packageName)
+
+private fun AppDiscoverySourceReport.rawText(): String =
+    rawFailure?.let { "$source: $it" } ?: when (outcome) {
+        AppDiscoverySourceOutcome.NotRequired -> "$source: $outcome"
+        else -> "$source: $outcome, count=$itemCount"
+    }

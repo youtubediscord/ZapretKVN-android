@@ -75,17 +75,15 @@ class AppsViewModel(
         viewModelScope.launch {
             try {
                 val snapshot = appCatalog.load()
+                val rawProblemText = snapshot.rawProblemText()
+                val failed = snapshot.discovery.completeness == AppDiscoveryCompleteness.Failed
                 catalog.value = catalog.value.copy(
-                    apps = snapshot.apps,
-                    loaded = true,
-                    warning = when (snapshot.discovery.completeness) {
-                        AppDiscoveryCompleteness.Partial ->
-                            "Android предоставил только часть списка приложений. " +
-                                "Проверьте системное разрешение и повторите."
-
-                        else -> null
-                    },
+                    apps = if (failed) catalog.value.apps else snapshot.apps,
+                    loaded = !failed,
+                    error = rawProblemText.takeIf { failed },
+                    warning = rawProblemText.takeUnless { failed },
                 )
+                if (failed) return@launch
                 val installedSuggestedApps = defaultVpnPackages(snapshot.apps)
                 val newlySuggestedPackages = installedSuggestedApps.intersect(
                     PopularAppSuggestions.packagesAddedInCurrentRevision,
@@ -99,7 +97,7 @@ class AppsViewModel(
                 throw failure
             } catch (failure: Exception) {
                 catalog.value = catalog.value.copy(
-                    error = failure.message ?: "Не удалось прочитать список приложений.",
+                    error = failure.toString(),
                 )
             } finally {
                 catalog.value = catalog.value.copy(loading = false)

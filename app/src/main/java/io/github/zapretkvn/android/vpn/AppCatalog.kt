@@ -21,6 +21,22 @@ data class InstalledApp(
 internal data class AppCatalogSnapshot(
     val apps: List<InstalledApp>,
     val discovery: AppDiscoverySummary,
+    val rawFailures: List<String>,
+) {
+    fun rawProblemText(): String? = buildList {
+        discovery.rawProblemText()?.let(::add)
+        addAll(rawFailures)
+    }.takeIf { it.isNotEmpty() }?.joinToString(separator = "\n")
+}
+
+private data class HandlerPackagesResult(
+    val packages: Set<String>,
+    val rawFailures: List<String>,
+)
+
+private data class ApplicationLabelResult(
+    val label: String,
+    val rawFailures: List<String>,
 )
 
 class AppCatalog(context: Context) {
@@ -32,12 +48,6 @@ class AppCatalog(context: Context) {
         val telegramPackages = installedTelegramPackages()
         val youtubePackages = installedYouTubePackages()
         val discovery = discoverApplications()
-        if (discovery.summary.completeness == AppDiscoveryCompleteness.Failed) {
-            throw IllegalStateException(
-                "Android не предоставил доступ к списку приложений. " +
-                    "Проверьте системное разрешение на просмотр установленных приложений.",
-            )
-        }
         val apps = discovery.applications
             .asSequence()
             .filterNot { it.packageName == appContext.packageName }
@@ -49,9 +59,9 @@ class AppCatalog(context: Context) {
                     enabled = application.enabled,
                     suggestion = suggestedAppLabel(
                         packageName = application.packageName,
-                        browserPackages = browserPackages,
-                        telegramPackages = telegramPackages,
-                        youtubePackages = youtubePackages,
+                        browserPackages = browserPackages.packages,
+                        telegramPackages = telegramPackages.packages,
+                        youtubePackages = youtubePackages.packages,
                     ),
                 )
             }
@@ -61,23 +71,35 @@ class AppCatalog(context: Context) {
                     .thenBy(InstalledApp::packageName),
             )
             .toList()
-        AppCatalogSnapshot(apps = apps, discovery = discovery.summary)
+        AppCatalogSnapshot(
+            apps = apps,
+            discovery = discovery.summary,
+            rawFailures = buildList {
+                addAll(browserPackages.rawFailures)
+                addAll(telegramPackages.rawFailures)
+                addAll(youtubePackages.rawFailures)
+                discovery.applications.flatMapTo(this) { it.rawFailures }
+            },
+        )
     }
 
-    private fun installedBrowserPackages(): Set<String> {
+    private fun installedBrowserPackages(): HandlerPackagesResult {
         return handlerPackages(
+            "BrowserHandlers",
             Intent.makeMainSelectorActivity(Intent.ACTION_MAIN, Intent.CATEGORY_APP_BROWSER),
             Intent(Intent.ACTION_VIEW, Uri.parse("https://example.com"))
                 .addCategory(Intent.CATEGORY_BROWSABLE),
         )
     }
 
-    private fun installedTelegramPackages(): Set<String> = handlerPackages(
+    private fun installedTelegramPackages(): HandlerPackagesResult = handlerPackages(
+        "TelegramHandlers",
         Intent(Intent.ACTION_VIEW, Uri.parse("tg://resolve?domain=telegram"))
             .addCategory(Intent.CATEGORY_BROWSABLE),
     )
 
-    private fun installedYouTubePackages(): Set<String> = handlerPackages(
+    private fun installedYouTubePackages(): HandlerPackagesResult = handlerPackages(
+        "YouTubeHandlers",
         Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/watch?v=dQw4w9WgXcQ"))
             .addCategory(Intent.CATEGORY_BROWSABLE),
         Intent(Intent.ACTION_VIEW, Uri.parse("https://youtu.be/dQw4w9WgXcQ"))
@@ -86,11 +108,22 @@ class AppCatalog(context: Context) {
             .addCategory(Intent.CATEGORY_BROWSABLE),
     )
 
-    private fun handlerPackages(vararg intents: Intent): Set<String> = intents
-        .asSequence()
-        .flatMap { intent -> bestEffortResolveActivities(intent).asSequence() }
-        .mapNotNull { it.activityInfo?.packageName }
-        .toSet()
+    private fun handlerPackages(
+        operation: String,
+        vararg intents: Intent,
+    ): HandlerPackagesResult {
+        val packages = linkedSetOf<String>()
+        val rawFailures = mutableListOf<String>()
+        intents.forEachIndexed { index, intent ->
+            try {
+                resolveActivities(intent)
+                    .mapNotNullTo(packages) { it.activityInfo?.packageName }
+            } catch (failure: Exception) {
+                rawFailures += "$operation[$index]: $failure"
+            }
+        }
+        return HandlerPackagesResult(packages = packages, rawFailures = rawFailures)
+    }
 
     private fun discoverApplications(): AppDiscoveryReport = AppDiscoveryCoordinator(
         ownPackageName = appContext.packageName,
@@ -125,38 +158,39 @@ class AppCatalog(context: Context) {
     ).discover()
 
     private fun toDiscoveredApplication(application: ApplicationInfo): DiscoveredApplication =
-        DiscoveredApplication(
-            packageName = application.packageName,
-            label = applicationLabel(application),
-            system = application.flags and (
-                ApplicationInfo.FLAG_SYSTEM or ApplicationInfo.FLAG_UPDATED_SYSTEM_APP
-            ) != 0,
-            enabled = application.enabled,
-        )
-
-    private fun applicationLabel(application: ApplicationInfo): String {
-        val loaded = try {
-            application.loadLabel(packageManager).toString()
-        } catch (_: RuntimeException) {
-            application.packageName
+        applicationLabel(application).let { label ->
+            DiscoveredApplication(
+                packageName = application.packageName,
+                label = label.label,
+                system = application.flags and (
+                    ApplicationInfo.FLAG_SYSTEM or ApplicationInfo.FLAG_UPDATED_SYSTEM_APP
+                ) != 0,
+                enabled = application.enabled,
+                rawFailures = label.rawFailures,
+            )
         }
-        return loaded.ifBlank { application.packageName }
+
+    private fun applicationLabel(application: ApplicationInfo): ApplicationLabelResult {
+        return try {
+            val loaded = application.loadLabel(packageManager).toString()
+            ApplicationLabelResult(
+                label = loaded.ifBlank { application.packageName },
+                rawFailures = emptyList(),
+            )
+        } catch (failure: RuntimeException) {
+            ApplicationLabelResult(
+                label = application.packageName,
+                rawFailures = listOf(
+                    "loadLabel(${application.packageName}): $failure",
+                ),
+            )
+        }
     }
 
     private fun launcherApplications(category: String): List<ApplicationInfo> =
         resolveActivities(
             Intent(Intent.ACTION_MAIN).addCategory(category),
         ).mapNotNull { it.activityInfo?.applicationInfo }
-
-    // Handler queries only add suggestion badges; they never decide catalog membership.
-    private fun bestEffortResolveActivities(intent: Intent): List<ResolveInfo> =
-        try {
-            resolveActivities(intent)
-        } catch (_: SecurityException) {
-            emptyList()
-        } catch (_: RuntimeException) {
-            emptyList()
-        }
 
     @Suppress("DEPRECATION")
     private fun resolveActivities(intent: Intent): List<ResolveInfo> =
