@@ -10,7 +10,7 @@ ASSETS="$PROJECT_ROOT/app/src/main/assets/rule-sets"
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf -- "$TMP_DIR"' EXIT
 "$CLI" rule-set compile \
-    "$PROJECT_ROOT/rulesets/source/zapret-ru-domains.json" \
+    "$PROJECT_ROOT/rulesets/zapret-ru-domains.json" \
     -o "$TMP_DIR/zapret-ru-domains.srs"
 cmp -s "$TMP_DIR/zapret-ru-domains.srs" "$ASSETS/zapret-ru-domains.srs" || {
     echo "Packaged RU domain rule-set is not reproducible from pinned source/CLI." >&2
