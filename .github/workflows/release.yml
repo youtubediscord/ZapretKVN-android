@@ -154,6 +154,7 @@ jobs:
           sudo chown "$(id -un)" /dev/kvm || true
           EMULATOR="$ANDROID_SDK_ROOT/emulator/emulator"
           test -x "$EMULATOR"
+          "$EMULATOR" -list-avds | grep -Fx release_gate_api36
           : > emulator.log
           start_emulator() {
             local attempt emulator_pid deadline
