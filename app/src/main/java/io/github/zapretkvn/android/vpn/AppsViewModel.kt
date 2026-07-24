@@ -18,6 +18,7 @@ data class AppsUiState(
     val catalogLoaded: Boolean = false,
     val loading: Boolean = false,
     val error: String? = null,
+    val warning: String? = null,
 ) {
     val needsAppSelection: Boolean
         get() = initialized && allowedPackages.isEmpty()
@@ -34,30 +35,33 @@ class AppsViewModel(
     private val selectionStore: AppSelectionStore,
     private val appCatalog: AppCatalog,
 ) : ViewModel() {
-    private val apps = MutableStateFlow<List<InstalledApp>>(emptyList())
-    private val catalogLoaded = MutableStateFlow(false)
-    private val loading = MutableStateFlow(false)
-    private val error = MutableStateFlow<String?>(null)
+    private data class CatalogState(
+        val apps: List<InstalledApp> = emptyList(),
+        val loaded: Boolean = false,
+        val loading: Boolean = false,
+        val error: String? = null,
+        val warning: String? = null,
+    )
+
+    private val catalog = MutableStateFlow(CatalogState())
 
     init {
         refresh()
     }
 
     val state = combine(
-        apps,
+        catalog,
         selectionStore.selection,
-        catalogLoaded,
-        loading,
-        error,
-    ) { installedApps, selection, isCatalogLoaded, isLoading, loadError ->
+    ) { catalogState, selection ->
         AppsUiState(
-            apps = installedApps,
+            apps = catalogState.apps,
             allowedPackages = selection.allowedPackages,
             scopeMode = selection.mode,
             initialized = selection.initialized,
-            catalogLoaded = isCatalogLoaded,
-            loading = isLoading,
-            error = loadError,
+            catalogLoaded = catalogState.loaded,
+            loading = catalogState.loading,
+            error = catalogState.error,
+            warning = catalogState.warning,
         )
     }.stateIn(
         scope = viewModelScope,
@@ -66,33 +70,44 @@ class AppsViewModel(
     )
 
     fun refresh() {
-        if (loading.value) return
-        loading.value = true
-        error.value = null
+        if (catalog.value.loading) return
+        catalog.value = catalog.value.copy(loading = true, error = null, warning = null)
         viewModelScope.launch {
             try {
-                val installedApps = appCatalog.load()
-                apps.value = installedApps
-                catalogLoaded.value = true
-                val enabledSuggestedApps = installedApps
+                val snapshot = appCatalog.load()
+                catalog.value = catalog.value.copy(
+                    apps = snapshot.apps,
+                    loaded = true,
+                    warning = when (snapshot.discovery.completeness) {
+                        AppDiscoveryCompleteness.Partial ->
+                            "Android предоставил только часть списка приложений. " +
+                                "Проверьте системное разрешение и повторите."
+
+                        else -> null
+                    },
+                )
+                val enabledSuggestedApps = snapshot.apps
                     .asSequence()
                     .filter(InstalledApp::enabled)
                     .filter { it.suggestion != null }
                     .map(InstalledApp::packageName)
                     .toSet()
+                val newlySuggestedPackages = enabledSuggestedApps.intersect(
+                    PopularAppSuggestions.packagesAddedInCurrentRevision,
+                )
                 selectionStore.initializeIfNeeded(
                     suggestedPackages = enabledSuggestedApps,
-                    newlySuggestedPackages = enabledSuggestedApps.intersect(
-                        PopularAppSuggestions.packagesAddedInCurrentRevision,
-                    ),
+                    newlySuggestedPackages = newlySuggestedPackages,
                     suggestionRevision = PopularAppSuggestions.MIGRATION_REVISION,
                 )
             } catch (failure: CancellationException) {
                 throw failure
             } catch (failure: Exception) {
-                error.value = failure.message ?: "Не удалось прочитать список приложений."
+                catalog.value = catalog.value.copy(
+                    error = failure.message ?: "Не удалось прочитать список приложений.",
+                )
             } finally {
-                loading.value = false
+                catalog.value = catalog.value.copy(loading = false)
             }
         }
     }
@@ -108,7 +123,7 @@ class AppsViewModel(
     }
 
     fun removeMissingPackages() {
-        val available = apps.value.asSequence().map(InstalledApp::packageName).toSet()
+        val available = catalog.value.apps.asSequence().map(InstalledApp::packageName).toSet()
         viewModelScope.launch {
             selectionStore.replaceAllowlist(state.value.allowedPackages.intersect(available))
         }

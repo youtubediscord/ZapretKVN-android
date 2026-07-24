@@ -171,6 +171,18 @@ fun AppPickerScreen(
                 }
             }
 
+            state.warning?.let { warning ->
+                item(key = "warning") {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Text(warning, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        OutlinedButton(onClick = viewModel::refresh) { Text("Повторить") }
+                    }
+                }
+            }
+
             state.error?.let { loadError ->
                 item(key = "error") {
                     Column(

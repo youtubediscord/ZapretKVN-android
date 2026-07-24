@@ -468,9 +468,11 @@ wireguard-import/    независимый parser WireGuard/AWG без зави
 - foreground VPN service и соответствующий Android 14+ service type/permission;
 - `POST_NOTIFICATIONS` на Android 13+;
 - камера только при открытии QR scanner;
-- `QUERY_ALL_PACKAGES` для полного per-app picker на Android 11+; явные
-  `MAIN`/`LAUNCHER` queries и объединение трёх `PackageManager`-источников сохраняют
-  список запускаемых приложений на OEM-прошивках с урезанным installed-app API;
+- `QUERY_ALL_PACKAGES` для полного per-app picker на Android 11+; основной
+  `getInstalledApplications()` сверяется с явными `MAIN`/`LAUNCHER` queries, а
+  `getInstalledPackages()` вызывается только при ошибке, почти пустом результате
+  или доказанном launcher-расхождении. Типизированный discovery-report различает
+  полный, восстановленный, частичный и неудачный каталог без сохранения package list;
 - `REQUEST_INSTALL_PACKAGES` только для явно запущенного GitHub updater и штатного installer;
 - системный file picker без broad storage permission;
 - буфер только после явного нажатия.

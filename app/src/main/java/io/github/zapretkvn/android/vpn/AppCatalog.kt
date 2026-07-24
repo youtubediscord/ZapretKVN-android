@@ -18,26 +18,34 @@ data class InstalledApp(
     val suggestion: String? = null,
 )
 
+internal data class AppCatalogSnapshot(
+    val apps: List<InstalledApp>,
+    val discovery: AppDiscoverySummary,
+)
+
 class AppCatalog(context: Context) {
     private val appContext = context.applicationContext
     private val packageManager = appContext.packageManager
 
-    suspend fun load(): List<InstalledApp> = withContext(Dispatchers.IO) {
+    internal suspend fun load(): AppCatalogSnapshot = withContext(Dispatchers.IO) {
         val browserPackages = installedBrowserPackages()
         val telegramPackages = installedTelegramPackages()
         val youtubePackages = installedYouTubePackages()
-        catalogApplications()
+        val discovery = discoverApplications()
+        if (discovery.summary.completeness == AppDiscoveryCompleteness.Failed) {
+            throw IllegalStateException(
+                "Android не предоставил доступ к списку приложений. " +
+                    "Проверьте системное разрешение на просмотр установленных приложений.",
+            )
+        }
+        val apps = discovery.applications
             .asSequence()
             .filterNot { it.packageName == appContext.packageName }
             .map { application ->
                 InstalledApp(
                     packageName = application.packageName,
-                    label = runCatching { application.loadLabel(packageManager).toString() }
-                        .getOrDefault(application.packageName)
-                        .ifBlank { application.packageName },
-                    system = application.flags and (
-                        ApplicationInfo.FLAG_SYSTEM or ApplicationInfo.FLAG_UPDATED_SYSTEM_APP
-                    ) != 0,
+                    label = application.label,
+                    system = application.system,
                     enabled = application.enabled,
                     suggestion = suggestedAppLabel(
                         packageName = application.packageName,
@@ -53,6 +61,7 @@ class AppCatalog(context: Context) {
                     .thenBy(InstalledApp::packageName),
             )
             .toList()
+        AppCatalogSnapshot(apps = apps, discovery = discovery.summary)
     }
 
     private fun installedBrowserPackages(): Set<String> {
@@ -79,37 +88,75 @@ class AppCatalog(context: Context) {
 
     private fun handlerPackages(vararg intents: Intent): Set<String> = intents
         .asSequence()
-        .flatMap { intent ->
-            runCatching { resolveActivities(intent) }
-                .getOrDefault(emptyList())
-                .asSequence()
-        }
+        .flatMap { intent -> bestEffortResolveActivities(intent).asSequence() }
         .mapNotNull { it.activityInfo?.packageName }
         .toSet()
 
-    private fun catalogApplications(): List<ApplicationInfo> {
-        val applicationsByPackage = linkedMapOf<String, ApplicationInfo>()
-        val sources = listOf(
-            ::installedApplications,
-            ::installedPackageApplications,
-            ::launcherApplications,
+    private fun discoverApplications(): AppDiscoveryReport = AppDiscoveryCoordinator(
+        ownPackageName = appContext.packageName,
+        primaryInventory = NamedAppDiscoverySource(
+            id = AppDiscoverySourceId.InstalledApplications,
+            source = AppDiscoverySource {
+                installedApplications().map(::toDiscoveredApplication)
+            },
+        ),
+        fallbackInventory = NamedAppDiscoverySource(
+            id = AppDiscoverySourceId.InstalledPackages,
+            source = AppDiscoverySource {
+                installedPackageApplications().map(::toDiscoveredApplication)
+            },
+        ),
+        supplements = listOf(
+            NamedAppDiscoverySource(
+                id = AppDiscoverySourceId.Launcher,
+                source = AppDiscoverySource {
+                    launcherApplications(Intent.CATEGORY_LAUNCHER)
+                        .map(::toDiscoveredApplication)
+                },
+            ),
+            NamedAppDiscoverySource(
+                id = AppDiscoverySourceId.LeanbackLauncher,
+                source = AppDiscoverySource {
+                    launcherApplications(Intent.CATEGORY_LEANBACK_LAUNCHER)
+                        .map(::toDiscoveredApplication)
+                },
+            ),
+        ),
+    ).discover()
+
+    private fun toDiscoveredApplication(application: ApplicationInfo): DiscoveredApplication =
+        DiscoveredApplication(
+            packageName = application.packageName,
+            label = applicationLabel(application),
+            system = application.flags and (
+                ApplicationInfo.FLAG_SYSTEM or ApplicationInfo.FLAG_UPDATED_SYSTEM_APP
+            ) != 0,
+            enabled = application.enabled,
         )
-        sources.forEach { source ->
-            runCatching(source)
-                .getOrDefault(emptyList())
-                .forEach { application ->
-                    applicationsByPackage.putIfAbsent(application.packageName, application)
-                }
+
+    private fun applicationLabel(application: ApplicationInfo): String {
+        val loaded = try {
+            application.loadLabel(packageManager).toString()
+        } catch (_: RuntimeException) {
+            application.packageName
         }
-        return applicationsByPackage.values.toList()
+        return loaded.ifBlank { application.packageName }
     }
 
-    private fun launcherApplications(): List<ApplicationInfo> = listOf(
-        Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER),
-        Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LEANBACK_LAUNCHER),
-    ).flatMap { intent ->
-        resolveActivities(intent).mapNotNull { it.activityInfo?.applicationInfo }
-    }
+    private fun launcherApplications(category: String): List<ApplicationInfo> =
+        resolveActivities(
+            Intent(Intent.ACTION_MAIN).addCategory(category),
+        ).mapNotNull { it.activityInfo?.applicationInfo }
+
+    // Handler queries only add suggestion badges; they never decide catalog membership.
+    private fun bestEffortResolveActivities(intent: Intent): List<ResolveInfo> =
+        try {
+            resolveActivities(intent)
+        } catch (_: SecurityException) {
+            emptyList()
+        } catch (_: RuntimeException) {
+            emptyList()
+        }
 
     @Suppress("DEPRECATION")
     private fun resolveActivities(intent: Intent): List<ResolveInfo> =

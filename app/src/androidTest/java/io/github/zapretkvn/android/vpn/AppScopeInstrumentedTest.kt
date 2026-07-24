@@ -36,7 +36,7 @@ class AppScopeInstrumentedTest {
         assertEquals(setOf(SETTINGS_PACKAGE), stored.allowedPackages)
         assertTrue(stored.initialized)
         assertFalse(
-            container.appCatalog.load().any { it.packageName == application.packageName },
+            container.appCatalog.load().apps.any { it.packageName == application.packageName },
         )
     }
 
