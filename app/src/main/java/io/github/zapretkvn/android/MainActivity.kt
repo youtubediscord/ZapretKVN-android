@@ -150,13 +150,13 @@ class MainActivity : ComponentActivity() {
                 )
             }
         }
-        if (savedInstanceState == null) handleExternalImport(intent)
+        if (savedInstanceState == null) handleIntent(intent)
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        handleExternalImport(intent)
+        handleIntent(intent)
     }
 
     override fun onStart() {
@@ -186,7 +186,14 @@ class MainActivity : ComponentActivity() {
         vpnController.setDiagnosticsVisible(activityStarted && diagnosticsSelected)
     }
 
-    private fun handleExternalImport(intent: Intent) {
+    private fun handleIntent(intent: Intent) {
+        if (intent.action == ACTION_REQUEST_VPN_START) {
+            val profileId = intent.getStringExtra(EXTRA_PROFILE_ID).orEmpty()
+            intent.action = null
+            intent.removeExtra(EXTRA_PROFILE_ID)
+            if (profileId.isNotBlank()) requestVpnStart(profileId)
+            return
+        }
         val uri = intent.externalImportUri() ?: return
         profilesViewModel.importDocument(uri)
     }
@@ -249,6 +256,12 @@ class MainActivity : ComponentActivity() {
         } catch (error: Exception) {
             updateController.failInstallation(error.message ?: "Не удалось открыть системную установку.")
         }
+    }
+
+    companion object {
+        const val ACTION_REQUEST_VPN_START =
+            "io.github.zapretkvn.android.action.REQUEST_VPN_START"
+        const val EXTRA_PROFILE_ID = "profile_id"
     }
 }
 

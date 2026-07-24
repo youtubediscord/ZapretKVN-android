@@ -1,4 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Zapret KVN</string>
+    <string name="quick_settings_tile_label">Zapret KVN</string>
+    <string name="quick_settings_tile_off">Выключено</string>
+    <string name="quick_settings_tile_starting">Подключение…</string>
+    <string name="quick_settings_tile_on">Подключено</string>
+    <string name="quick_settings_tile_stopping">Отключение…</string>
+    <string name="quick_settings_tile_error">Ошибка подключения</string>
 </resources>
